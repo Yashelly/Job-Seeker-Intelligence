@@ -1,0 +1,56 @@
+candidate:
+  name: Example Candidate
+  location: Example City
+  preferred_locations:
+    - Example City
+    - Remote
+  preferred_work_modes:
+    - remote
+    - hybrid
+
+target_tracks:
+  - Technical Support
+  - IT Operations
+  - Business Systems
+  - Process Automation
+
+skills:
+  strong:
+    - Technical troubleshooting
+    - Documentation
+    - Customer communication
+    - SaaS administration
+  medium:
+    - Scripting
+    - Workflow automation
+    - Cloud platforms
+    - SQL
+  weak_or_limited:
+    - Infrastructure as Code
+    - Container platforms
+    - Advanced security engineering
+
+experience:
+  years_total_it: 2
+  summary:
+    - Experience supporting internal users and business applications
+    - Experience documenting recurring issues and standard procedures
+    - Experience improving routine workflows
+
+education:
+  status: completed
+  field: Information Systems
+
+languages:
+  - English
+
+constraints:
+  avoid_domains:
+    - manual labor
+    - warehouse operations
+    - retail cashier work
+  preferred_domains:
+    - information technology
+    - software operations
+    - technical support
+    - automation

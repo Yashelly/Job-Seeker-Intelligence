@@ -1,0 +1,18 @@
+profile: profile/user_profile.local.yaml
+db: data/app.db
+
+extractor: openai
+openai_model: gpt-4o-mini
+match_evaluator: openai
+
+source:
+  type: cvbankas
+  start_url: https://www.cvbankas.lt/
+  max_pages: 10
+  limit: 100
+  delay_seconds: 0.5
+
+input:
+  text: null
+  text_file: null
+  url: null

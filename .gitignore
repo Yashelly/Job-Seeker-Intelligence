@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Envs
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+.env.local
+.env.private
+
+# Local/private configs
+profile/user_profile.yaml
+config/*.local.yaml
+config/*.private.yaml
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs/temp
+logs/
+tmp/
+temp/
+*.log
+*.csv
+failed_urls*.txt
+failed_urls*.json
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Archives
+*.zip
