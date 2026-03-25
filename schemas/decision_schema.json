@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "required": ["score", "decision", "breakdown", "top_strengths", "top_gaps", "blockers"],
+  "properties": {
+    "score": {"type": "integer"},
+    "decision": {"type": "string", "enum": ["apply", "stretch", "skip"]},
+    "breakdown": {"type": "object"},
+    "top_strengths": {"type": "array", "items": {"type": "string"}},
+    "top_gaps": {"type": "array", "items": {"type": "string"}},
+    "blockers": {"type": "array", "items": {"type": "string"}}
+  }
+}

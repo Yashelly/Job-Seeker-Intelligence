@@ -1,0 +1,4 @@
+You are given a raw job description.
+Return strict JSON only according to job_schema.json.
+Do not invent missing values.
+Use null / "" / [] for unknown fields.

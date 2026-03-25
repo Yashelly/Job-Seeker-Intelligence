@@ -1,0 +1,47 @@
+{
+  "type": "object",
+  "required": [
+    "company",
+    "role_title",
+    "work_mode",
+    "salary",
+    "responsibilities",
+    "required_skills",
+    "preferred_skills",
+    "tools_and_platforms",
+    "experience_requirements",
+    "language_requirements",
+    "domain",
+    "seniority_hints",
+    "red_flags",
+    "notes"
+  ],
+  "properties": {
+    "company": {"type": "string"},
+    "role_title": {"type": "string"},
+    "location": {"type": "string"},
+    "work_mode": {"type": "string", "enum": ["remote", "hybrid", "on-site", "unknown"]},
+    "salary": {
+      "type": "object",
+      "properties": {
+        "min": {"type": ["integer", "null"]},
+        "max": {"type": ["integer", "null"]},
+        "currency": {"type": "string"},
+        "gross_or_net": {"type": "string"}
+      }
+    },
+    "employment_type": {"type": "string"},
+    "responsibilities": {"type": "array", "items": {"type": "string"}},
+    "required_skills": {"type": "array", "items": {"type": "string"}},
+    "preferred_skills": {"type": "array", "items": {"type": "string"}},
+    "tools_and_platforms": {"type": "array", "items": {"type": "string"}},
+    "experience_requirements": {"type": "string"},
+    "language_requirements": {"type": "array", "items": {"type": "string"}},
+    "education_requirements": {"type": "string"},
+    "domain": {"type": "string"},
+    "seniority_hints": {"type": "array", "items": {"type": "string"}},
+    "red_flags": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "string"},
+    "raw_text_excerpt": {"type": "string"}
+  }
+}

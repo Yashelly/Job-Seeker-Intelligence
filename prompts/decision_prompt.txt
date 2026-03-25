@@ -1,0 +1,6 @@
+Given a structured job payload and a candidate profile, explain:
+- top strengths
+- top gaps
+- whether the role is apply / stretch / skip
+
+Be concise and factual.
