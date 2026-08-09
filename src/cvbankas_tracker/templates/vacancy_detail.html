@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>{{ vacancy.title }}</h2>
+  <p><strong>Company:</strong> {{ vacancy.company or '-' }}<br>
+  <strong>Location:</strong> {{ vacancy.location or '-' }}<br>
+  <strong>Salary:</strong> {{ vacancy.salary_text or '-' }}<br>
+  <strong>Source:</strong> {{ vacancy.source_name }} / {{ vacancy.source_id }}<br>
+  <strong>URL:</strong> <a href="{{ vacancy.source_url|safe_external_url }}" rel="noopener noreferrer">open original vacancy</a></p>
+</section>
+<section class="grid">
+  <div class="card">
+    <h2>Analysis</h2>
+    {% if analysis %}
+      <p><strong>Score:</strong> {{ analysis.score }}<br><strong>Fit:</strong> {{ analysis.fit_label.value }}</p>
+      <p>{{ analysis.explanation }}</p>
+      <h3>Matched</h3><ul>{% for point in analysis.matched_points %}<li>{{ point }}</li>{% else %}<li class="muted">None recorded.</li>{% endfor %}</ul>
+      <h3>Missing</h3><ul>{% for point in analysis.missing_points %}<li>{{ point }}</li>{% else %}<li class="muted">None recorded.</li>{% endfor %}</ul>
+    {% else %}<p class="muted">No analysis yet.</p>{% endif %}
+  </div>
+  <div class="card">
+    <h2>Application status</h2>
+    <p>Current: <strong>{{ application.status.value if application else 'Not tracked' }}</strong></p>
+    <form method="post" action="/applications/status">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="vacancy_source_url" value="{{ vacancy.source_url }}">
+      <label for="status">New status</label>
+      <select id="status" name="status">
+        {% for status in statuses %}<option value="{{ status.value.lower() }}">{{ status.value }}</option>{% endfor %}
+      </select>
+      <label for="correction_reason">Correction reason (required only for invalid transitions)</label>
+      <input id="correction_reason" name="correction_reason">
+      <button type="submit">Update status</button>
+    </form>
+    <h3>Status history</h3>
+    <ul>{% for event in history %}<li>{{ event.previous_status.value if event.previous_status else '-' }} → {{ event.new_status.value }} ({{ event.origin.value }}/{{ event.kind.value }})</li>{% else %}<li class="muted">No history yet.</li>{% endfor %}</ul>
+  </div>
+</section>
+<section class="card">
+  <h2>Actions for this vacancy</h2>
+  <ul>{% for action in actions %}<li>#{{ action.id }} {{ action.title }} — {{ action.state.value }} — {{ action.due_at_utc or 'no due date' }}</li>{% else %}<li class="muted">No actions yet.</li>{% endfor %}</ul>
+</section>
+{% endblock %}

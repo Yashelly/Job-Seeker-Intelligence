@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card" aria-labelledby="fresh-heading">
+  <h2 id="fresh-heading">New recommended vacancies</h2>
+  {% if latest_run and latest_run.status == 'partial' %}<p class="badge">PARTIAL RUN: latest inbox results came from an incomplete collection.</p>{% endif %}
+  {% if inbox_items %}
+  <table>
+    <thead><tr><th>Score</th><th>Fit</th><th>Vacancy</th><th>Why</th></tr></thead>
+    <tbody>
+    {% for item in inbox_items %}
+      <tr>
+        <td>{{ item.latest_score if item.latest_score is not none else '-' }}</td>
+        <td>{{ item.latest_fit_label or '-' }}</td>
+        <td><a href="/vacancy?url={{ item.source_url|urlencode }}">{{ item.title }}</a><br><span class="muted">{{ item.company }} · {{ item.source_name }}</span></td>
+        <td>{{ item.explanation or '-' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No new recommendations match the current settings.</p>{% endif %}
+</section>
+<section class="card" aria-labelledby="reminders-heading">
+  <h2 id="reminders-heading">Due and overdue actions</h2>
+  {% if reminders %}
+  <ul>
+  {% for reminder in reminders %}
+    <li><span class="badge">{{ reminder.reminder_state }}</span> {{ reminder.action.title }} — {{ reminder.action.due_at_utc|local_due(timezone) }}</li>
+  {% endfor %}
+  </ul>
+  {% else %}<p class="muted">No due or overdue actions.</p>{% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,42 @@
+[project]
+name = "job-seeker-intelligence"
+version = "0.2.0"
+description = "Multi-source job discovery, analysis, and application tracking from a terminal UI"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "openai==2.29.0",
+    "playwright==1.54.0",
+    "PyYAML==6.0.2",
+    "rich==13.9.4",
+    "fastapi==0.116.1",
+    "Jinja2==3.1.6",
+    "uvicorn==0.52.1",
+    "httpx==0.28.1",
+]
+keywords = [
+    "job-search",
+    "automation",
+    "vacancy-scraper",
+    "terminal-ui",
+    "sqlite",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+]
+
+[project.scripts]
+job-seeker = "cvbankas_tracker.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,402 @@
+profile: sample_data/active_profile.json
+db: job_seeker.db
+export: exports/job_seeker_report.md
+analysis_strategy: rule
+openai_model: gpt-4.1-mini
+sources:
+  enabled:
+  - cvbankas
+  - hh
+  - startup_jobs
+  - justjoin
+  - euremotejobs
+  options:
+    hh:
+      fetch_mode: browser
+      browser_headless: true
+      browser_profile_dir: .browser_profiles/hh
+  keywords:
+    cvbankas:
+    - automatizavimas
+    - automatizavimo specialistas
+    - automatizavimo inžinierius
+    - procesų automatizavimas
+    - verslo procesų automatizavimas
+    - RPA
+    - n8n
+    - Make
+    - Make.com
+    - Zapier
+    - Power Automate
+    - UiPath
+    - low-code
+    - no-code
+    - workflow automation
+    - API automation
+    - dirbtinis intelektas
+    - dirbtinio intelekto
+    - dirbtinio intelekto sprendimų inžinierius
+    - dirbtinio intelekto sprendimu inzinierius
+    - dirbtinio intelekto sistemų analitikas
+    - dirbtinio intelekto sistemu analitikas
+    - DI automatizavimas
+    - DI sprendimų inžinierius
+    - DI sistemų analitikas
+    - AI automation
+    - AI engineer
+    - Applied AI Engineer
+    - AI-first
+    - AI-first .NET
+    - AI solutions
+    - AI Solutions Expert
+    - AI agents
+    - agentic automation
+    - Claude
+    - Claude Code
+    - Claude cowork
+    - Codex
+    - OpenAI Codex
+    - ChatGPT automation
+    - LLM automation
+    - Automation Developer
+    - Junior AI Automation Specialist
+    - automation engineer
+    - automation specialist
+    - API integration
+    - webhook automation
+    - webhooks
+    - integration specialist
+    - AI integration specialist
+    - AI Workflow Automation Specialist
+    - AI Workflow Engineer
+    - Workflow Automation Specialist
+    - Workflow Automations Specialist
+    - Process Automation Developer
+    - No-Code Automation Specialist
+    - No-Code Automation Expert
+    - Airtable
+    - Retool
+    - Glide
+    - GoHighLevel
+    - GHL
+    - HubSpot
+    - Pipedrive
+    - CRM automation
+    - Google Apps Script
+    - Power Platform
+    - Power Apps
+    - Power Pages
+    - Automation Architect
+    - Automation Architect RPA
+    - agentic process automation
+    - agentic AI systems
+    - Gemini automation
+    - LangChain
+    - LangGraph
+    - Gemini
+    hh:
+    - специалист по автоматизации
+    - инженер автоматизации
+    - разработчик автоматизации
+    - automation developer
+    - automation specialist
+    - automation engineer
+    - автоматизация процессов
+    - автоматизация бизнес процессов
+    - специалист по автоматизации процессов
+    - инженер по автоматизации процессов
+    - бизнес автоматизация
+    - автоматизация документооборота
+    - RPA
+    - RPA разработчик
+    - RPA developer
+    - RPA engineer
+    - разработчик RPA
+    - инженер RPA
+    - n8n
+    - n8n automation
+    - n8n developer
+    - Make
+    - Make.com
+    - Make.com automation
+    - Zapier
+    - Zapier automation
+    - UiPath
+    - UiPath developer
+    - UiPath разработчик
+    - Power Automate
+    - Power Automate developer
+    - Power Platform
+    - Power Platform developer
+    - low-code
+    - no-code
+    - no code
+    - low code
+    - low-code developer
+    - no-code developer
+    - low-code разработчик
+    - no-code разработчик
+    - специалист low-code
+    - специалист no-code
+    - автоматизация workflow
+    - автоматизация API
+    - AI agents
+    - AI agent developer
+    - AI automation specialist
+    - LLM automation
+    - Claude
+    - Claude Code
+    - Claude automation
+    - Codex
+    - OpenAI Codex
+    - ChatGPT automation
+    - OpenAI automation
+    - GPT automation
+    - специалист ИИ
+    - специалист по искусственному интеллекту
+    - инженер искусственного интеллекта
+    - инженер ИИ
+    - разработчик ИИ
+    - AI engineer
+    - Applied AI Engineer
+    - AI solutions
+    - AI Solutions Expert
+    - AI-first
+    - LLM engineer
+    - Prompt engineer
+    - специалист по нейросетям
+    - инженер по нейросетям
+    - разработчик нейросетей
+    - специалист по внедрению ИИ
+    - внедрение ИИ
+    - ИИ решения
+    - AI решения
+    - ИИ автоматизация
+    - AI automation
+    - разработчик автоматизации процессов
+    - архитектор автоматизации
+    - архитектор RPA
+    - интеграция систем
+    - специалист по интеграциям
+    - разработчик интеграций
+    - интегратор API
+    - webhook
+    - webhooks
+    - API integration
+    - webhook automation
+    - AI integration specialist
+    - AI Workflow Automation Specialist
+    - AI Workflow Engineer
+    - Workflow Automation Specialist
+    - Process Automation Developer
+    - Automation Architect
+    - Automation Architect RPA
+    - Power Apps
+    - Power Pages
+    - no-code automation specialist
+    - no-code automation expert
+    - low-code workflow automation specialist
+    - Airtable
+    - Retool
+    - Glide
+    - GoHighLevel
+    - GHL
+    - HubSpot
+    - Pipedrive
+    - CRM automation
+    - CRM автоматизация
+    - Google Apps Script
+    - agentic process automation
+    - agentic AI systems
+    - Gemini automation
+    - Gemini
+    - LangChain
+    - LangGraph
+    startup_jobs:
+    - AI automation
+    - automation specialist
+    - automation engineer
+    - automation developer
+    - workflow automation
+    - AI Workflow Automation Specialist
+    - AI Workflow Engineer
+    - AI Integration Specialist
+    - Process Automation Developer
+    - No-Code Automation Specialist
+    - No-Code Automation Expert
+    - low-code
+    - no-code
+    - low-code developer
+    - no-code developer
+    - RPA
+    - UiPath
+    - Power Automate
+    - Power Platform
+    - Power Apps
+    - n8n
+    - Make.com
+    - Zapier
+    - Airtable
+    - Retool
+    - Glide
+    - GoHighLevel
+    - HubSpot
+    - CRM automation
+    - Google Apps Script
+    - webhooks
+    - API integration
+    - AI agents
+    - agentic automation
+    - agentic process automation
+    - LLM automation
+    - AI engineer
+    - Applied AI Engineer
+    - AI solutions
+    - AI Solutions Expert
+    - AI-first
+    - LLM engineer
+    - Prompt engineer
+    - Claude Code
+    - Codex
+    - OpenAI Codex
+    - LangChain
+    - LangGraph
+    - Gemini automation
+    justjoin:
+    - AI automation
+    - automation specialist
+    - automation engineer
+    - automation developer
+    - workflow automation
+    - AI Workflow Automation Specialist
+    - AI Workflow Engineer
+    - AI Integration Specialist
+    - Process Automation Developer
+    - No-Code Automation Specialist
+    - No-Code Automation Expert
+    - low-code
+    - no-code
+    - low-code developer
+    - no-code developer
+    - RPA
+    - UiPath
+    - Power Automate
+    - Power Platform
+    - Power Apps
+    - n8n
+    - Make.com
+    - Zapier
+    - Airtable
+    - Retool
+    - Glide
+    - GoHighLevel
+    - HubSpot
+    - CRM automation
+    - Google Apps Script
+    - webhooks
+    - API integration
+    - AI agents
+    - agentic automation
+    - agentic process automation
+    - LLM automation
+    - AI engineer
+    - Applied AI Engineer
+    - AI solutions
+    - AI Solutions Expert
+    - AI-first
+    - LLM engineer
+    - Prompt engineer
+    - Claude Code
+    - Codex
+    - OpenAI Codex
+    - LangChain
+    - LangGraph
+    - Gemini automation
+    euremotejobs:
+    - AI automation
+    - automation specialist
+    - automation engineer
+    - automation developer
+    - workflow automation
+    - AI Workflow Automation Specialist
+    - AI Workflow Engineer
+    - AI Integration Specialist
+    - Process Automation Developer
+    - No-Code Automation Specialist
+    - No-Code Automation Expert
+    - low-code
+    - no-code
+    - low-code developer
+    - no-code developer
+    - RPA
+    - UiPath
+    - Power Automate
+    - Power Platform
+    - Power Apps
+    - n8n
+    - Make.com
+    - Zapier
+    - Airtable
+    - Retool
+    - Glide
+    - GoHighLevel
+    - HubSpot
+    - CRM automation
+    - Google Apps Script
+    - webhooks
+    - API integration
+    - AI agents
+    - agentic automation
+    - agentic process automation
+    - LLM automation
+    - AI engineer
+    - Applied AI Engineer
+    - AI solutions
+    - AI Solutions Expert
+    - AI-first
+    - LLM engineer
+    - Prompt engineer
+    - Claude Code
+    - Codex
+    - OpenAI Codex
+    - LangChain
+    - LangGraph
+    - Gemini automation
+search:
+  keywords:
+  - AI automation
+  - automation specialist
+  - automation engineer
+  - RPA
+  - n8n
+  - Make
+  - Zapier
+  - UiPath
+  - Power Automate
+  - low-code
+  - no-code
+  - AI agents
+  - Claude Code
+  - Codex
+  - AI Workflow Automation Specialist
+  - No-Code Automation Specialist
+  - Process Automation Developer
+  - Power Platform
+  - Power Apps
+  - Airtable
+  - Retool
+  - Glide
+  - GoHighLevel
+  - HubSpot
+  - CRM automation
+  - Google Apps Script
+  - webhooks
+  - API integration
+  - LangChain
+  - LangGraph
+  listing_url: ''
+  limit: 10
+  max_pages: 1
+telegram:
+  max_vacancies: 10
+  notify_when_empty: false

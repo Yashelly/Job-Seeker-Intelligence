@@ -1,0 +1,53 @@
+__pycache__/
+.pytest_cache/
+.venv/
+*.egg-info/
+*.pyc
+*.pyo
+
+# Local secrets/configuration
+.env
+.env.*
+!.env.example
+.browser_profiles/
+config/*.local.yaml
+config/*.local.yml
+config/*.private.yaml
+config/*.private.yml
+
+# Local SQLite databases and lock/backup sidecars
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite3-shm
+*.sqlite3-wal
+*.sqlite3-journal
+*.db.bak
+*.db.*.bak
+*.sqlite3.bak
+*.sqlite3.*.bak
+*.bootstrap.lock
+
+# Generated runtime output
+logs/
+exports/*.md
+exports/*.txt
+exports/*.csv
+exports/*.json
+exports/*.html
+exports/*.png
+exports/*.jpg
+exports/*.jpeg
+exports/*.webp
+
+# Temporary runtime/image artifacts
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+*.part
+*.runtime.lock
+_tmp_*/

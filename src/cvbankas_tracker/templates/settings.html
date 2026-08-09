@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Shared inbox and reminder settings</h2>
+  <form method="post" action="/settings">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="minimum_score">Minimum score threshold</label>
+    <input id="minimum_score" name="minimum_score" type="number" min="0" max="100" value="{{ preferences.minimum_score }}">
+    <label><input type="checkbox" name="hide_below_threshold" value="1" {% if preferences.hide_below_threshold %}checked{% endif %}> Hide below-threshold vacancies</label>
+    <label for="sort_by">Sort vacancies by</label>
+    <select id="sort_by" name="sort_by">
+      {% for option in ['score','newest','title','company'] %}<option value="{{ option }}" {% if preferences.sort_by == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
+    </select>
+    <label for="source_name">Source filter</label><input id="source_name" name="source_name" value="{{ preferences.source_name }}">
+    <label for="fit_label">Fit filter</label><select id="fit_label" name="fit_label"><option value="">Any</option>{% for fit in ['High','Medium','Low'] %}<option value="{{ fit }}" {% if preferences.fit_label == fit %}selected{% endif %}>{{ fit }}</option>{% endfor %}</select>
+    <label for="application_status">Application status filter</label><select id="application_status" name="application_status"><option value="">Any</option>{% for status in ['Saved','Applied','Interview','Offer','Rejected','Withdrawn'] %}<option value="{{ status }}" {% if preferences.application_status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>
+    <label><input type="checkbox" name="new_only" value="1" {% if preferences.new_only %}checked{% endif %}> New only</label>
+    <label><input type="checkbox" name="current_run_only" value="1" {% if preferences.current_run_only %}checked{% endif %}> Current run only</label>
+    <label for="timezone">User timezone</label>
+    <input id="timezone" name="timezone" value="{{ timezone }}" aria-describedby="timezone-help">
+    <p id="timezone-help" class="muted">Use an IANA timezone such as Europe/Vilnius. Saving confirms the timezone for CLI/TUI/web local due-time display.</p>
+    <button type="submit">Save settings</button>
+  </form>
+</section>
+{% endblock %}
