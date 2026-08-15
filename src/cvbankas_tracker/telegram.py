@@ -92,7 +92,7 @@ class TelegramNotifier:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=30) as response:  # noqa: S310 - Telegram API
+            with urlopen(request, timeout=30) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except HTTPError as error:
             detail = _telegram_error_detail(error)
@@ -123,7 +123,7 @@ def discover_telegram_chats(bot_token: str) -> list[TelegramChat]:
         method="POST",
     )
     try:
-        with urlopen(request, timeout=30) as response:  # noqa: S310 - Telegram API
+        with urlopen(request, timeout=30) as response:
             data = json.loads(response.read().decode("utf-8"))
     except HTTPError as error:
         detail = _telegram_error_detail(error)

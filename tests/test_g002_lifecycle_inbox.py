@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sqlite3
 import subprocess
 import sys
 import tempfile
-import threading
 import unittest
+from pathlib import Path
 
+from cvbankas_tracker.main import SourceBatchResult, _collection_terminal_status
 from cvbankas_tracker.models import (
     AnalysisMethod,
     ApplicationRecord,
@@ -17,7 +17,6 @@ from cvbankas_tracker.models import (
     Vacancy,
     VacancyAnalysis,
 )
-from cvbankas_tracker.main import SourceBatchResult, _collection_terminal_status
 from cvbankas_tracker.storage import (
     CollectionRunAlreadyActive,
     DatabaseManager,

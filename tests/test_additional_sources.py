@@ -1,8 +1,8 @@
-from pathlib import Path
 import sys
 import unittest
-from urllib.parse import parse_qs, urlparse
+from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -10,7 +10,6 @@ from cvbankas_tracker.sources import resolve_source_for_url, resolve_sources
 from cvbankas_tracker.sources.euremotejobs import EuRemoteJobsSource
 from cvbankas_tracker.sources.justjoin_it import JustJoinItSource
 from cvbankas_tracker.sources.startup_jobs import StartupJobsSource
-
 
 JOB_POSTING_HTML = """
 <html>

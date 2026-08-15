@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
 from argparse import Namespace
+from pathlib import Path
 from unittest.mock import patch
 
 from cvbankas_tracker.models import (
@@ -16,14 +16,14 @@ from cvbankas_tracker.models import (
     VacancyListItem,
 )
 from cvbankas_tracker.storage import DatabaseManager
-from cvbankas_tracker.tui import JobSeekerTui
 from cvbankas_tracker.tracking import (
     ActionService,
     ApplicationTracker,
+    discover_local_timezone,
     local_datetime_to_utc_iso,
     utc_iso_to_local_datetime,
-    discover_local_timezone,
 )
+from cvbankas_tracker.tui import JobSeekerTui
 
 
 def make_vacancy(url: str = "https://example.test/job") -> Vacancy:

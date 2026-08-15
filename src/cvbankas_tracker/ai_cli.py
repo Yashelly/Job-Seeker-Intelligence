@@ -1,15 +1,60 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 from pathlib import Path
 
 DEFAULT_CLI_TIMEOUT = 240
 
+_SCORE_DIGITS = re.compile(r"-?\d+")
+
 
 class AICLIError(RuntimeError):
     """Raised when a subscription-backed CLI backend fails to produce a usable response."""
+
+
+def coerce_score(raw: object, *, low: int = 0, high: int = 100) -> int:
+    """Best-effort parse of a model-provided score into a clamped integer.
+
+    Language models return scores as ints, floats, or strings ("85", "85%",
+    "high"). Anything unparseable collapses to ``low`` rather than raising, so a
+    malformed field never crashes the analysis pipeline. ``bool`` is rejected
+    explicitly because it is an ``int`` subclass but never a real score.
+    """
+    if isinstance(raw, bool):
+        return low
+    if isinstance(raw, (int, float)):
+        value: float = raw
+    else:
+        match = _SCORE_DIGITS.search(str(raw))
+        if not match:
+            return low
+        value = int(match.group())
+    return max(low, min(high, int(value)))
+
+
+def coerce_str_list(raw: object) -> list[str]:
+    """Coerce a model field into a list of non-empty strings.
+
+    Tolerates the common malformed shapes: a bare string (wrapped into a single
+    item), ``None`` (empty), or a list containing non-string scalars (stringified)
+    and nested structures (skipped). Never raises on unexpected types.
+    """
+    if isinstance(raw, str):
+        text = raw.strip()
+        return [text] if text else []
+    if not isinstance(raw, (list, tuple)):
+        return []
+    items: list[str] = []
+    for value in raw:
+        if value is None or isinstance(value, (dict, list, tuple)):
+            continue
+        text = str(value).strip()
+        if text:
+            items.append(text)
+    return items
 
 
 def _strip_fenced_json(text: str) -> str:
@@ -34,7 +79,7 @@ def parse_json_response(text: str) -> dict[str, object]:
         start = candidate.find("{")
         end = candidate.rfind("}")
         if start == -1 or end == -1 or end <= start:
-            raise AICLIError(f"CLI backend returned non-JSON output: {text[:500]!r}")
+            raise AICLIError(f"CLI backend returned non-JSON output: {text[:500]!r}") from None
         try:
             data = json.loads(candidate[start : end + 1])
         except json.JSONDecodeError as exc:

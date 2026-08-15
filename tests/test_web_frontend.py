@@ -91,6 +91,46 @@ class JobManagerTests(unittest.TestCase):
                 break
             time.sleep(0.02)
 
+    def _run_to_completion(self, manager: JobManager, kind: str, target) -> int:
+        job = manager.start(kind, target)
+        for _ in range(200):
+            if manager.get(job.id).status != "running":
+                break
+            time.sleep(0.01)
+        return job.id
+
+    def test_log_is_bounded(self) -> None:
+        from cvbankas_tracker.web_jobs import MAX_LOG_CHARS
+
+        manager = JobManager()
+
+        def noisy() -> int:
+            print("A" * (MAX_LOG_CHARS * 2))
+            return 0
+
+        job_id = self._run_to_completion(manager, "search", noisy)
+        snap = manager.snapshot(job_id)
+        self.assertLessEqual(len(snap["log"]), MAX_LOG_CHARS)
+        self.assertTrue(snap["log"].startswith("…[earlier output truncated]…"))
+
+    def test_finished_at_is_recorded(self) -> None:
+        manager = JobManager()
+        job_id = self._run_to_completion(manager, "search", lambda: 0)
+        snap = manager.snapshot(job_id)
+        self.assertEqual(snap["status"], "done")
+        self.assertTrue(snap["finished_at"])
+
+    def test_completed_jobs_are_pruned(self) -> None:
+        from cvbankas_tracker.web_jobs import MAX_COMPLETED_JOBS
+
+        manager = JobManager()
+        for _ in range(MAX_COMPLETED_JOBS + 5):
+            self._run_to_completion(manager, "search", lambda: 0)
+        # Pruning happens at the start of each run, so the most recent finished
+        # job survives until the next start(): the bound is MAX + 1.
+        with manager._lock:
+            self.assertLessEqual(len(manager._jobs), MAX_COMPLETED_JOBS + 1)
+
 
 class _Barrier:
     def __init__(self) -> None:
@@ -216,27 +256,75 @@ class ProfileUploadTests(unittest.TestCase):
                 self.assertEqual(resp.status_code, 200)
                 self.assertIn("Jane Doe", resp.text)
 
-            save_path = Path(tmp) / "out_profile.json"
-            token = _csrf(client, "/profile")
             import json as _json
+            import os
 
-            resp = client.post(
-                "/profile/save",
-                data={
-                    "csrf_token": token,
-                    "profile_json": _json.dumps(GENERATED),
-                    "save_path": str(save_path),
-                },
-                headers=HEADERS,
-                follow_redirects=False,
-            )
-            self.assertEqual(resp.status_code, 303)
-            self.assertTrue(save_path.exists())
+            # Saves are constrained to the working tree; run from tmp so a
+            # relative path lands inside it instead of polluting the repo.
+            prev_cwd = Path.cwd()
+            os.chdir(tmp)
+            try:
+                token = _csrf(client, "/profile")
+                resp = client.post(
+                    "/profile/save",
+                    data={
+                        "csrf_token": token,
+                        "profile_json": _json.dumps(GENERATED),
+                        "save_path": "out_profile.json",
+                    },
+                    headers=HEADERS,
+                    follow_redirects=False,
+                )
+                self.assertEqual(resp.status_code, 303)
+                saved = Path(tmp) / "out_profile.json"
+                self.assertTrue(saved.exists())
 
-            from cvbankas_tracker.io_utils import ProfileFileReader
+                from cvbankas_tracker.io_utils import ProfileFileReader
 
-            loaded = ProfileFileReader().read(save_path)
-            self.assertEqual(loaded.name, "Jane Doe")
+                loaded = ProfileFileReader().read(saved)
+                self.assertEqual(loaded.name, "Jane Doe")
+            finally:
+                os.chdir(prev_cwd)
+
+    def test_save_rejects_path_escaping_working_tree(self) -> None:
+        import json as _json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _client(tmp)
+            token = _csrf(client, "/profile")
+            for bad_path in ("../escape.json", str(Path(tmp) / "abs_escape.json")):
+                resp = client.post(
+                    "/profile/save",
+                    data={
+                        "csrf_token": token,
+                        "profile_json": _json.dumps(GENERATED),
+                        "save_path": bad_path,
+                    },
+                    headers=HEADERS,
+                    follow_redirects=False,
+                )
+                self.assertEqual(resp.status_code, 400, bad_path)
+                self.assertFalse((Path(tmp) / "abs_escape.json").exists())
+
+    def test_build_rejects_oversized_cv(self) -> None:
+        from cvbankas_tracker.profile_builder import MAX_CV_UPLOAD_BYTES
+
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _client(tmp)
+            token = _csrf(client, "/profile")
+            oversized = b"x" * (MAX_CV_UPLOAD_BYTES + 1024)
+            with patch("cvbankas_tracker.web.resolve_ai_backend", return_value="claude_cli"), patch(
+                "cvbankas_tracker.web.generate_profile_dict"
+            ) as gen:
+                resp = client.post(
+                    "/profile/build",
+                    data={"csrf_token": token},
+                    files={"cv_file": ("cv.txt", oversized, "text/plain")},
+                    headers=HEADERS,
+                )
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn("too large", resp.text)
+            gen.assert_not_called()
 
     def test_build_rejects_non_ai_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

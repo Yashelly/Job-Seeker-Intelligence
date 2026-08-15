@@ -111,7 +111,7 @@ class CvbankasCollector:
 
             request_url = Request(url, headers=request_headers)
 
-        with urlopen(request_url, timeout=20) as response:  # noqa: S310 - configured job source
+        with urlopen(request_url, timeout=20) as response:
             content_bytes = response.read()
             charset = response.headers.get_content_charset() or "utf-8"
             return content_bytes.decode(charset, errors="ignore")

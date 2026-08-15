@@ -66,6 +66,34 @@ class ScheduleConfigTests(unittest.TestCase):
             loaded = load_schedule(path)
         self.assertEqual(loaded.time, "19:00")
 
+    def test_load_recovers_from_corrupted_field_types(self) -> None:
+        # Hand-edited / corrupted schedule.json with wrong types must not crash
+        # load_schedule; every field falls back to a safe default.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "s.json"
+            path.write_text(
+                '{"enabled": "yes", "time": "07:30", "limit": "abc", '
+                '"max_pages": null, "sources": "cvbankas", "keywords": 5, '
+                '"analysis_strategy": 3}',
+                encoding="utf-8",
+            )
+            loaded = load_schedule(path)
+        self.assertEqual(loaded.time, "07:30")
+        self.assertEqual(loaded.limit, 10)
+        self.assertEqual(loaded.max_pages, 1)
+        self.assertEqual(loaded.sources, list(loaded.sources))  # a real list
+        self.assertIsInstance(loaded.sources, list)
+        self.assertIsInstance(loaded.keywords, list)
+        self.assertTrue(loaded.enabled)
+
+    def test_load_recovers_from_non_object_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "s.json"
+            path.write_text("[1, 2, 3]", encoding="utf-8")
+            loaded = load_schedule(path)
+        self.assertFalse(loaded.enabled)
+        self.assertEqual(loaded.time, "19:00")
+
 
 class SchedulerTickTests(unittest.TestCase):
     def _sched(self, tmp: str, cfg: ScheduleConfig, runner):

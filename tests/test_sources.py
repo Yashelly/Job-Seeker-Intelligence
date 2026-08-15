@@ -1,10 +1,9 @@
-from pathlib import Path
 import sys
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from cvbankas_tracker.sources import resolve_sources
 from argparse import Namespace
 
 from cvbankas_tracker.main import (
@@ -12,6 +11,7 @@ from cvbankas_tracker.main import (
     parse_search_keywords,
     resolve_source_search_keywords,
 )
+from cvbankas_tracker.sources import resolve_sources
 from cvbankas_tracker.sources.cvbankas import CvbankasSource
 
 

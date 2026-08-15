@@ -28,6 +28,7 @@ from .main import (
 from .models import ApplicationStatus, ApplicationStatusOrigin, InboxPreferences
 from .profile_builder import (
     AI_PROFILE_BACKENDS,
+    MAX_CV_UPLOAD_BYTES,
     SUPPORTED_CV_SUFFIXES,
     ProfileGenerationError,
     extract_cv_text,
@@ -66,14 +67,14 @@ def validate_loopback_bind_host(host: str) -> str:
         ip = ipaddress.ip_address(candidate)
     except ValueError:
         if candidate.lower() != "localhost":
-            raise ValueError("Web host must be localhost or a loopback IP address.")
+            raise ValueError("Web host must be localhost or a loopback IP address.") from None
         try:
             infos = socket.getaddrinfo(candidate, None)
         except socket.gaierror as error:  # pragma: no cover - platform DNS failure
             raise ValueError(f"Could not resolve web host: {candidate}") from error
         addresses = {info[4][0] for info in infos}
         if not addresses or not all(ipaddress.ip_address(address).is_loopback for address in addresses):
-            raise ValueError("localhost must resolve only to loopback addresses.")
+            raise ValueError("localhost must resolve only to loopback addresses.") from None
         return "localhost"
     if not ip.is_loopback:
         raise ValueError("Web host must be loopback-only.")
@@ -165,6 +166,27 @@ def _safe_external_url(value: str | None) -> str:
 
 def _redirect(path: str) -> RedirectResponse:
     return RedirectResponse(path, status_code=status.HTTP_303_SEE_OTHER)
+
+
+def resolve_web_profile_path(user_path: str, *, base_dir: Path) -> Path:
+    """Constrain a browser-submitted profile save path to the app working tree.
+
+    The dashboard is loopback-only and CSRF-protected, but ``save_path`` is still
+    untrusted input from a form. A generated profile may only be written *inside*
+    ``base_dir`` (the process working directory): absolute paths and ``..``
+    escapes are rejected, so this endpoint can never clobber a file elsewhere on
+    disk. CLI/TUI callers keep full path freedom — the constraint lives at the
+    web boundary, not in ``write_profile_json``.
+    """
+    base = Path(base_dir).resolve()
+    raw = (user_path or "").strip() or "profile_from_cv.json"
+    candidate = Path(raw)
+    resolved = (candidate if candidate.is_absolute() else base / candidate).resolve()
+    if resolved != base and base not in resolved.parents:
+        raise ValueError("Profile path must stay inside the application directory.")
+    if resolved.is_dir():
+        raise ValueError("Profile path must be a file, not a directory.")
+    return resolved
 
 
 def _coerce_bool(value: str | None) -> bool:
@@ -415,7 +437,10 @@ def create_app(
         except ValueError:
             reason = form.get("correction_reason", "").strip()
             if not reason:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid transition; provide a correction reason.")
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Invalid transition; provide a correction reason.",
+                ) from None
             tracker.set_status(
                 canonical_url,
                 _ALLOWED_STATUS[status_key],
@@ -684,7 +709,18 @@ def create_app(
                 **_profile_page_context(request),
             )
 
-        contents = await cv_file.read()
+        # Read one byte past the cap so an oversized upload is detected without
+        # buffering the whole (possibly huge) file into memory.
+        contents = await cv_file.read(MAX_CV_UPLOAD_BYTES + 1)
+        if len(contents) > MAX_CV_UPLOAD_BYTES:
+            return _render(
+                templates,
+                request,
+                "profile.html",
+                page_title="Profile",
+                error=f"CV is too large (limit {MAX_CV_UPLOAD_BYTES // (1024 * 1024)} MB).",
+                **_profile_page_context(request),
+            )
         tmp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
@@ -732,9 +768,11 @@ def create_app(
         if not isinstance(profile, dict):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid profile data: expected a JSON object.")
 
-        save_path = (form.get("save_path", "") or "profile_from_cv.json").strip()
         try:
-            written = write_profile_json(save_path, profile)
+            target = resolve_web_profile_path(
+                form.get("save_path", ""), base_dir=Path.cwd()
+            )
+            written = write_profile_json(target, profile)
             ProfileFileReader().read(written)
         except Exception as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Could not save profile: {error}") from error
@@ -747,7 +785,7 @@ def create_app(
         active_path = request.app.state.profile_path
         try:
             active_profile = ProfileFileReader().read(active_path)
-        except Exception:  # noqa: BLE001 - missing/invalid active profile is non-fatal here
+        except Exception:
             active_profile = None
         return {
             "active_path": active_path,

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from argparse import Namespace
-from contextlib import redirect_stdout
 import io
-from pathlib import Path
 import tempfile
 import unittest
+from argparse import Namespace
+from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from rich.console import Console
+
+from cvbankas_tracker.main import run_database_command
 from cvbankas_tracker.models import (
     AnalysisMethod,
     ApplicationStatus,
@@ -16,11 +19,9 @@ from cvbankas_tracker.models import (
     Vacancy,
     VacancyAnalysis,
 )
-from cvbankas_tracker.main import run_database_command
 from cvbankas_tracker.storage import DatabaseManager
-from cvbankas_tracker.tui import JobSeekerTui, run_tui
 from cvbankas_tracker.tracking import ActionService, ApplicationTracker
-from rich.console import Console
+from cvbankas_tracker.tui import JobSeekerTui, run_tui
 
 
 def make_args(db_path: Path, **overrides) -> Namespace:

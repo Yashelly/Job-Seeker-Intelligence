@@ -8,7 +8,7 @@ from typing import Protocol
 
 from openai import OpenAI
 
-from .ai_cli import parse_json_response, run_claude_cli, run_codex_cli
+from .ai_cli import coerce_str_list, parse_json_response, run_claude_cli, run_codex_cli
 from .models import Vacancy
 
 EXTRACTION_SYSTEM_PROMPT = (
@@ -37,12 +37,19 @@ def build_extraction_prompt_payload(vacancy: Vacancy, visible_text: str) -> dict
 
 
 def normalize_extraction_result(data: dict[str, object]) -> dict[str, object]:
+    """Coerce untrusted model extraction output into schema-valid fields.
+
+    List fields are forced to lists of non-empty strings so a scalar or a list
+    with non-string members never propagates into a ``Vacancy``.
+    """
+    if not isinstance(data, dict):
+        data = {}
     return {
         "company": str(data.get("company", "")).strip(),
         "location": str(data.get("location", "")).strip(),
         "salary_text": str(data.get("salary_text", "")).strip(),
-        "requirements": list(data.get("requirements", [])),
-        "responsibilities": list(data.get("responsibilities", [])),
+        "requirements": coerce_str_list(data.get("requirements")),
+        "responsibilities": coerce_str_list(data.get("responsibilities")),
         "notes": str(data.get("notes", "")).strip(),
     }
 
@@ -92,8 +99,7 @@ class OpenAIVacancyExtractionClient:
             ],
         )
         raw_content = completion.choices[0].message.content or "{}"
-        data = json.loads(raw_content)
-        return normalize_extraction_result(data)
+        return normalize_extraction_result(parse_json_response(raw_content))
 
 
 class _CLIVacancyExtractionClient:

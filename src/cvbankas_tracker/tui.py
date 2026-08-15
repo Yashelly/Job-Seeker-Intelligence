@@ -698,7 +698,7 @@ class JobSeekerTui:
             )
             self._pause()
             return
-        except Exception as error:  # noqa: BLE001 - TUI should keep running
+        except Exception as error:
             self.console.print(
                 Panel(
                     f"Unexpected error: {error}",
@@ -734,7 +734,7 @@ class JobSeekerTui:
         try:
             written = write_profile_json(save_path, profile)
             ProfileFileReader().read(written)
-        except Exception as error:  # noqa: BLE001 - TUI should keep running
+        except Exception as error:
             self.console.print(
                 Panel(f"Failed to save profile: {error}", title="Save error", border_style="red")
             )
@@ -899,7 +899,7 @@ class JobSeekerTui:
         except KeyboardInterrupt:
             exit_code = 130
             output.write("Stopped by user.\n")
-        except Exception as error:  # noqa: BLE001 - TUI should keep running
+        except Exception as error:
             exit_code = 1
             output.write(f"ERROR | {error}\n")
         finally:
@@ -935,7 +935,7 @@ class JobSeekerTui:
         except KeyboardInterrupt:
             exit_code = 130
             output.write("Stopped by user.\n")
-        except Exception as error:  # noqa: BLE001 - TUI should keep running
+        except Exception as error:
             exit_code = 1
             output.write(f"ERROR | {error}\n")
         finally:
@@ -1392,7 +1392,7 @@ class JobSeekerTui:
             return
         try:
             self.cfg = save_tui_config(self.config_path, self.cfg, self.state)
-        except Exception as error:  # noqa: BLE001 - TUI should stay usable
+        except Exception as error:
             self.console.print(f"[yellow]Could not save config: {error}[/yellow]")
             self._pause()
 

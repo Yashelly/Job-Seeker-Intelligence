@@ -1,9 +1,9 @@
-from pathlib import Path
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 
 class WorkflowTests(unittest.TestCase):

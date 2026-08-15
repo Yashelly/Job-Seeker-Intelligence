@@ -31,6 +31,10 @@ classifiers = [
     "Topic :: Office/Business",
 ]
 
+[project.optional-dependencies]
+# Pinned so the lint gate is byte-reproducible across machines and CI.
+dev = ["ruff==0.16.3"]
+
 [project.scripts]
 job-seeker = "cvbankas_tracker.main:main"
 
@@ -43,3 +47,26 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Pinned in-repo so the lint gate is reproducible in CI. Without this, a clean
+# CI runner falls back to Ruff's minimal default rule set (E/F only) and the
+# gate becomes meaningless; here we opt into a focused, high-signal ruleset.
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+
+[tool.ruff.lint]
+# A focused, high-signal set: correctness (E/F/W), import hygiene (I),
+# modernization (UP), likely-bug detection (B), and comprehension clarity (C4).
+# The stylistic SIM/PIE/RUF families are deliberately excluded — several of
+# their flags here are intentional (e.g. Cyrillic characters inside Lithuanian
+# and Russian keyword strings), so the gate stays meaningful rather than noisy.
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = [
+    # FastAPI's dependency-injection idiom is `param: T = Depends(...)`, which
+    # B008 flags as a function call in a default argument. It is intentional.
+    "B008",
+    # A few prompt/HTML string literals are long by nature; reflowing them for
+    # line length would hurt readability more than help.
+    "E501",
+]
