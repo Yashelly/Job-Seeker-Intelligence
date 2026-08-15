@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo, available_timezones
 
 from .models import (
@@ -46,7 +46,7 @@ def local_datetime_to_utc_iso(
     valid_folds: list[tuple[int, datetime]] = []
     for candidate_fold in (0, 1):
         aware = naive.replace(tzinfo=zone, fold=candidate_fold)
-        round_trip = aware.astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None)
+        round_trip = aware.astimezone(UTC).astimezone(zone).replace(tzinfo=None)
         if round_trip == naive:
             valid_folds.append((candidate_fold, aware))
     if not valid_folds:
@@ -58,7 +58,7 @@ def local_datetime_to_utc_iso(
         aware = next(value for candidate_fold, value in valid_folds if candidate_fold == fold)
     else:
         aware = valid_folds[0][1]
-    return aware.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return aware.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def utc_iso_to_local_datetime(utc_value: str, timezone_name: str) -> str:
@@ -98,7 +98,7 @@ def _timezone_offsets_match(timezone_name: str, years: tuple[int, ...] | None = 
         return False
     for year in years:
         for month in (1, 7):
-            probe = datetime(year, month, 1, 12, 0, tzinfo=timezone.utc)
+            probe = datetime(year, month, 1, 12, 0, tzinfo=UTC)
             expected = probe.astimezone().utcoffset()
             actual = probe.astimezone(zone).utcoffset()
             if expected != actual:
@@ -116,7 +116,7 @@ def _discover_timezone_by_offsets(default: str) -> str:
             continue
         zone = ZoneInfo(timezone_name)
         abbreviations = {
-            datetime(datetime.now().year, month, 1, 12, 0, tzinfo=timezone.utc)
+            datetime(datetime.now().year, month, 1, 12, 0, tzinfo=UTC)
             .astimezone(zone)
             .tzname()
             for month in (1, 7)

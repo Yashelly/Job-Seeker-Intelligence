@@ -1,9 +1,9 @@
-from pathlib import Path
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -16,8 +16,8 @@ from cvbankas_tracker.models import (
     Vacancy,
     VacancyAnalysis,
 )
-from cvbankas_tracker.storage import DatabaseManager
 from cvbankas_tracker.storage import (
+    DatabaseManager,
     DatabaseMigrationError,
     bootstrap_database,
     resolve_database_path,
@@ -281,7 +281,7 @@ class StorageAndIOTests(unittest.TestCase):
             ]
             completed = [process.communicate(timeout=30) for process in processes]
 
-            for process, (stdout, stderr) in zip(processes, completed):
+            for process, (stdout, stderr) in zip(processes, completed, strict=True):
                 self.assertEqual(
                     process.returncode,
                     0,

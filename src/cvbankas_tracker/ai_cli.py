@@ -79,7 +79,7 @@ def parse_json_response(text: str) -> dict[str, object]:
         start = candidate.find("{")
         end = candidate.rfind("}")
         if start == -1 or end == -1 or end <= start:
-            raise AICLIError(f"CLI backend returned non-JSON output: {text[:500]!r}")
+            raise AICLIError(f"CLI backend returned non-JSON output: {text[:500]!r}") from None
         try:
             data = json.loads(candidate[start : end + 1])
         except json.JSONDecodeError as exc:

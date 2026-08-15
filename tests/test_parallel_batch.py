@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import threading
 import tempfile
+import threading
 import unittest
 from argparse import Namespace
 from contextlib import redirect_stdout

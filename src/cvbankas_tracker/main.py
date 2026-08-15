@@ -1409,7 +1409,7 @@ def _run_source_batch(
                         break
                 if len(listing_urls) >= args.limit:
                     break
-        except Exception as error:  # noqa: BLE001 - one source should not stop all sources
+        except Exception as error:
             result.failed_count += 1
             print(safe_console_text(f"[{ts()}] {source.name} LISTING ERROR | {error}"))
             return result
@@ -1438,7 +1438,7 @@ def _run_source_batch(
                     collection_run_id=collection_run_id,
                 )
                 result.observed_count += 1
-            except Exception as error:  # noqa: BLE001 - batch mode should continue
+            except Exception as error:
                 result.failed_count += 1
                 error_label = "STORAGE LOCK ERROR" if _is_sqlite_lock_error(error) else "ERROR"
                 print(
@@ -1466,10 +1466,10 @@ def _execute_source_batches(
         thread_name_prefix="job-source",
     ) as executor:
         futures = [executor.submit(worker, source) for source in sources]
-        for source, future in zip(sources, futures):
+        for source, future in zip(sources, futures, strict=True):
             try:
                 results.append(future.result())
-            except Exception as error:  # noqa: BLE001 - one worker should not stop the run
+            except Exception as error:
                 print(
                     safe_console_text(
                         f"[{ts()}] {source.name} SOURCE WORKER ERROR | {error}"
@@ -1676,7 +1676,7 @@ def run_import(args: argparse.Namespace, cfg: dict | None = None) -> int:
                     report_rows=report_rows,
                     title=f"Imported Vacancy {index}/{len(processed_urls)}",
                 )
-            except Exception as error:  # noqa: BLE001 - import should continue
+            except Exception as error:
                 failed_count += 1
                 print(safe_console_text(f"[{ts()}] [{index}/{len(processed_urls)}] ERROR | {url} | {error}"))
 

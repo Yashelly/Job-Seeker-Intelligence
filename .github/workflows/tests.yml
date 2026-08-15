@@ -26,9 +26,18 @@ jobs:
         run: python scripts/verify_clean_deps.py --install
 
       - name: Install project
-        run: python -m pip install -e .
+        run: python -m pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: python -m ruff check src tests
 
       - name: Run tests
         env:
           OPENAI_API_KEY: ""
         run: python -m unittest discover -s tests -v
+
+      - name: Verify offline demo seeds data with no credentials
+        env:
+          OPENAI_API_KEY: ""
+          AI_BACKEND: ""
+        run: python main.py --demo

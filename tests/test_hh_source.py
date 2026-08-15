@@ -1,6 +1,6 @@
-from pathlib import Path
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
@@ -8,7 +8,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from cvbankas_tracker.sources import resolve_source_for_url
 from cvbankas_tracker.sources.hh import HhHtmlSource
-
 
 HH_LISTING_HTML = """
 <html>

@@ -195,7 +195,7 @@ class DailyScheduler:
         while not self._stop.is_set():
             try:
                 self.tick()
-            except Exception as error:  # noqa: BLE001 - a scheduler must never die on error
+            except Exception as error:
                 self._last_loop_error = repr(error)
             self._wake.wait(timeout=self._interval)
             self._wake.clear()
@@ -225,7 +225,7 @@ class DailyScheduler:
                 self._config.last_run_at = moment.isoformat(timespec="seconds")
                 self._persist_locked()
             return False
-        except Exception as error:  # noqa: BLE001 - record and don't retry-spin today
+        except Exception as error:
             with self._lock:
                 self._config.last_status = f"error: {error}"[:200]
                 self._config.last_run_at = moment.isoformat(timespec="seconds")

@@ -67,14 +67,14 @@ def validate_loopback_bind_host(host: str) -> str:
         ip = ipaddress.ip_address(candidate)
     except ValueError:
         if candidate.lower() != "localhost":
-            raise ValueError("Web host must be localhost or a loopback IP address.")
+            raise ValueError("Web host must be localhost or a loopback IP address.") from None
         try:
             infos = socket.getaddrinfo(candidate, None)
         except socket.gaierror as error:  # pragma: no cover - platform DNS failure
             raise ValueError(f"Could not resolve web host: {candidate}") from error
         addresses = {info[4][0] for info in infos}
         if not addresses or not all(ipaddress.ip_address(address).is_loopback for address in addresses):
-            raise ValueError("localhost must resolve only to loopback addresses.")
+            raise ValueError("localhost must resolve only to loopback addresses.") from None
         return "localhost"
     if not ip.is_loopback:
         raise ValueError("Web host must be loopback-only.")
@@ -437,7 +437,10 @@ def create_app(
         except ValueError:
             reason = form.get("correction_reason", "").strip()
             if not reason:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid transition; provide a correction reason.")
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Invalid transition; provide a correction reason.",
+                ) from None
             tracker.set_status(
                 canonical_url,
                 _ALLOWED_STATUS[status_key],
@@ -782,7 +785,7 @@ def create_app(
         active_path = request.app.state.profile_path
         try:
             active_profile = ProfileFileReader().read(active_path)
-        except Exception:  # noqa: BLE001 - missing/invalid active profile is non-fatal here
+        except Exception:
             active_profile = None
         return {
             "active_path": active_path,

@@ -127,7 +127,7 @@ class HhHtmlSource:
         self._temporary_browser_profile_dir: Path | None = None
 
     @classmethod
-    def from_options(cls, options: dict | None = None) -> "HhHtmlSource":
+    def from_options(cls, options: dict | None = None) -> HhHtmlSource:
         options = options or {}
         return cls(
             fetch_mode=str(options.get("fetch_mode", options.get("mode", "http"))),
@@ -249,7 +249,7 @@ class HhHtmlSource:
                 },
             )
 
-        with urlopen(request_url, timeout=20) as response:  # noqa: S310 - configured job source
+        with urlopen(request_url, timeout=20) as response:
             content_bytes = response.read()
             charset = response.headers.get_content_charset() or "utf-8"
             return content_bytes.decode(charset, errors="ignore")
@@ -258,20 +258,20 @@ class HhHtmlSource:
         if self._browser_context is not None:
             try:
                 self._browser_context.close()
-            except Exception:  # noqa: BLE001 - shutdown should not pollute CLI/TUI
+            except Exception:
                 pass
             self._browser_context = None
             self._browser_page = None
         if self._browser is not None:
             try:
                 self._browser.close()
-            except Exception:  # noqa: BLE001 - shutdown should not pollute CLI/TUI
+            except Exception:
                 pass
             self._browser = None
         if self._playwright is not None:
             try:
                 self._playwright.stop()
-            except Exception:  # noqa: BLE001 - shutdown should not pollute CLI/TUI
+            except Exception:
                 pass
             self._playwright = None
         if self._temporary_browser_profile_dir is not None:
@@ -680,7 +680,7 @@ class HhHtmlSource:
             else:
                 self._browser = self._playwright.chromium.launch(**browser_launch_kwargs)
                 self._browser_context = self._browser.new_context(**browser_context_kwargs)
-        except Exception as error:  # noqa: BLE001 - keep CLI error readable
+        except Exception as error:
             self.close()
             raise RuntimeError(
                 "HH browser mode could not start Chrome/Edge. "
@@ -704,7 +704,7 @@ class HhHtmlSource:
                 str(profile_dir),
                 **launch_kwargs,
             )
-        except Exception as error:  # noqa: BLE001 - fallback for locked profile
+        except Exception as error:
             if "ProcessSingleton" not in str(error) and "profile" not in str(error).lower():
                 raise
             fallback_profile_dir = Path(
@@ -724,7 +724,7 @@ class HhHtmlSource:
     def _wait_after_browser_action(self, page) -> None:
         try:
             page.wait_for_load_state("domcontentloaded", timeout=self.browser_timeout_ms)
-        except Exception:  # noqa: BLE001 - page may already be settled
+        except Exception:
             pass
         if self.browser_wait_ms:
             page.wait_for_timeout(self.browser_wait_ms)
@@ -733,7 +733,7 @@ class HhHtmlSource:
         for text in ("Понятно", "Accept", "I agree"):
             try:
                 page.get_by_text(text, exact=True).click(timeout=1000)
-            except Exception:  # noqa: BLE001 - popup is optional
+            except Exception:
                 continue
 
     def _find_search_input(self, page):
@@ -742,7 +742,7 @@ class HhHtmlSource:
             try:
                 locator.wait_for(state="visible", timeout=5000)
                 return locator
-            except Exception:  # noqa: BLE001 - try the next known selector
+            except Exception:
                 continue
         raise ValueError("HH search input was not found on the page.")
 
@@ -761,7 +761,7 @@ class HhHtmlSource:
         if self._playwright is not None:
             try:
                 playwright_path = self._playwright.chromium.executable_path
-            except Exception:  # noqa: BLE001 - optional fallback
+            except Exception:
                 playwright_path = ""
         if playwright_path and Path(playwright_path).exists():
             return playwright_path

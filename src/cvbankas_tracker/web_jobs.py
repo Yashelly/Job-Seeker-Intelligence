@@ -100,7 +100,7 @@ class JobManager:
                 job.exit_code = int(exit_code) if exit_code is not None else 0
                 job.status = "done"
                 job.finished_at = _now_iso()
-        except Exception as error:  # noqa: BLE001 - surfaced to the job log
+        except Exception as error:
             with self._lock:
                 job.error = str(error)
                 job.log += f"\nERROR | {error}\n"

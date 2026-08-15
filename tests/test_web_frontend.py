@@ -128,7 +128,7 @@ class JobManagerTests(unittest.TestCase):
             self._run_to_completion(manager, "search", lambda: 0)
         # Pruning happens at the start of each run, so the most recent finished
         # job survives until the next start(): the bound is MAX + 1.
-        with manager._lock:  # noqa: SLF001 - white-box retention assertion
+        with manager._lock:
             self.assertLessEqual(len(manager._jobs), MAX_COMPLETED_JOBS + 1)
 
 

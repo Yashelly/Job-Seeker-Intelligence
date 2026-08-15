@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import hashlib
-import threading
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import json
 import sqlite3
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import IO, Iterator, Literal
+from typing import IO, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .models import (
@@ -21,16 +22,15 @@ from .models import (
     ApplicationStatusEvent,
     ApplicationStatusEventKind,
     ApplicationStatusOrigin,
-    FitLabel,
     CollectionRun,
+    FitLabel,
     InboxItem,
     InboxPreferences,
+    TrackedApplicationItem,
     Vacancy,
     VacancyAnalysis,
     VacancyListItem,
-    TrackedApplicationItem,
 )
-
 
 DEFAULT_BUSY_TIMEOUT_MS = 30_000
 _LOCK_BYTE_COUNT = 1
@@ -113,7 +113,7 @@ def resolve_database_path(
 
 
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def normalize_utc_instant(value: str) -> str:
@@ -125,7 +125,7 @@ def normalize_utc_instant(value: str) -> str:
         raise ValueError(f"Invalid UTC instant: {value}") from error
     if parsed.tzinfo is None:
         raise ValueError(f"UTC instant must include a timezone offset: {value}")
-    return parsed.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return parsed.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def canonicalize_source_url(source_url: str) -> str:
@@ -284,7 +284,7 @@ def _backup_database(
 ) -> Path:
     target_dir = Path(backup_dir).expanduser() if backup_dir else db_path.parent
     target_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup_path = target_dir / f"{db_path.name}.{timestamp}.bak"
     backup_connection = sqlite3.connect(backup_path)
     try:
@@ -526,7 +526,6 @@ def _canonicalize_legacy_vacancy_urls(connection: sqlite3.Connection) -> None:
             continue
 
         survivor = _choose_canonical_survivor(canonical_url, original_urls)
-        survivor_row = next(row for row in group_rows if row["source_url"] == survivor)
         merged_application = _merged_application_for_urls(connection, original_urls, canonical_url)
 
         for row in group_rows:
@@ -812,15 +811,14 @@ class DatabaseManager:
         # up front. This prevents mid-vacancy partial writes caused by competing
         # deferred transactions while retaining normal busy_timeout protection
         # for external processes.
-        with _write_lock_for(self._db_path):
-            with self.connection() as connection:
-                try:
-                    connection.execute("BEGIN IMMEDIATE")
-                    yield connection
-                    connection.commit()
-                except Exception:
-                    connection.rollback()
-                    raise
+        with _write_lock_for(self._db_path), self.connection() as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
 
     def close(self) -> None:
         """Compatibility no-op; operational connections are per method."""
@@ -1812,7 +1810,7 @@ class DatabaseManager:
         *,
         title: str | None = None,
         notes: str | None = None,
-        due_at_utc: str | None | object = _UNSET,
+        due_at_utc: str | object | None = _UNSET,
     ) -> ActionItem:
         cleaned_title = None if title is None else " ".join(title.split())
         if cleaned_title == "":
@@ -1995,9 +1993,9 @@ def _action_item_from_row(row: sqlite3.Row) -> ActionItem:
 def _add_utc_hours(instant: str, hours: int) -> str:
     parsed = datetime.fromisoformat(instant.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return (
-        parsed.astimezone(timezone.utc)
+        parsed.astimezone(UTC)
         .replace(microsecond=0)
         .__add__(timedelta(hours=hours))
         .isoformat()
