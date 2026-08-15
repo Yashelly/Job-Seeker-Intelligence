@@ -243,6 +243,15 @@ def parse_args() -> argparse.Namespace:
         help="Start the local loopback-only web dashboard.",
     )
     parser.add_argument(
+        "--demo",
+        action="store_true",
+        help=(
+            "Populate a throwaway demo database from bundled sample fixtures using "
+            "deterministic rule-based scoring (no network, API keys, or logins). "
+            "Add --web to also open the dashboard on the demo data."
+        ),
+    )
+    parser.add_argument(
         "--web-host",
         default="127.0.0.1",
         help="Loopback host for --web; wildcard and non-loopback binds are rejected.",
@@ -1685,10 +1694,113 @@ def run_import(args: argparse.Namespace, cfg: dict | None = None) -> int:
     return 0 if report_rows else 2
 
 
+DEMO_DB_RELATIVE = "demo_data/demo.db"
+DEMO_PROFILE = "sample_data/active_profile.json"
+
+
+def _demo_namespace(db_path: str) -> argparse.Namespace:
+    """Argument set that drives run_batch against the bundled sample fixtures.
+
+    Everything is pinned to the offline path: the ``sample`` source (local HTML
+    fixtures) and ``rule`` scoring (deterministic, no AI backend), so the result
+    is byte-reproducible and needs no network, API key, or CLI login.
+    """
+    return argparse.Namespace(
+        config="",
+        profile=DEMO_PROFILE,
+        db=db_path,
+        export="demo_data/demo_report.md",
+        daily_run=False,
+        keyword="python",
+        keywords="python",
+        listing_url="",
+        limit=10,
+        max_pages=1,
+        source="live",
+        sources="sample",
+        cvbankas=False,
+        analysis_strategy="rule",
+        openai_model="gpt-4.1-mini",
+        refresh=True,
+        import_urls="",
+        import_urls_file="",
+        enabled_sources=["sample"],
+        search_keywords=["python"],
+        list_vacancies=False,
+        list_tracked=False,
+        vacancy_url="",
+        vacancy_id="",
+        vacancy_source="",
+        show_vacancy=False,
+        status=None,
+        note=None,
+        export_tracked="",
+    )
+
+
+def run_demo(args: argparse.Namespace) -> int:
+    """Offline, reproducible demo: seed a throwaway DB from sample fixtures.
+
+    Deliberately isolated from the user's real config and database — it writes
+    only under ``demo_data/`` and re-seeds from scratch on every invocation.
+    """
+    workspace = Path.cwd()
+    if not (workspace / "sample_data" / "listings.html").exists():
+        print(
+            safe_console_text(
+                "Demo mode must be run from the project root: the bundled "
+                "sample_data/ fixtures were not found in the current directory."
+            )
+        )
+        return 1
+
+    demo_dir = workspace / "demo_data"
+    demo_dir.mkdir(parents=True, exist_ok=True)
+    db_path = str(demo_dir / "demo.db")
+    # Re-seed from scratch so the demo is deterministic run-to-run and a stale
+    # collection-run lease from an interrupted run can never block it.
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        Path(db_path + suffix).unlink(missing_ok=True)
+
+    print(safe_console_text("Job Seeker Intelligence — offline demo"))
+    print(safe_console_text("  source=sample (local fixtures)  scoring=rule (deterministic)"))
+    print(safe_console_text(f"  demo database: {db_path}\n"))
+
+    exit_code = run_batch(_demo_namespace(db_path), cfg={})
+    # run_batch returns 2 when no *new* rows were written; for the demo an empty
+    # delta is still a successful seed, so only genuine failures propagate.
+    if exit_code not in (0, 2):
+        return exit_code
+
+    if getattr(args, "web", False):
+        from .web import run_web
+
+        print(safe_console_text("\nOpening the dashboard on the demo data…"))
+        return run_web(
+            db_path,
+            host=args.web_host,
+            port=args.web_port,
+            cfg={},
+            profile_path=DEMO_PROFILE,
+        )
+
+    print(
+        safe_console_text(
+            "\nDemo data ready. Explore it with:\n"
+            f"  python main.py --db {db_path} --inbox\n"
+            f"  python main.py --db {db_path} --web    (browse in a browser)\n"
+            "  python main.py --demo --web             (re-seed and open the dashboard)"
+        )
+    )
+    return 0
+
+
 def main() -> int:
     configure_console_encoding()
     load_dotenv_if_present()
     args = parse_args()
+    if args.demo:
+        return run_demo(args)
     open_tui_by_default = len(sys.argv) == 1
     cli_specified_source = _cli_option_present("--source") or _cli_option_present("--cvbankas")
     cli_specified_sources = _cli_option_present("--sources")

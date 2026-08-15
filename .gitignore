@@ -34,6 +34,9 @@ config/*.private.yml
 # Local dashboard scheduler state
 config/scheduler.json
 
+# Offline demo scratch (re-seeded on every `--demo` run)
+demo_data/
+
 # Tooling scratch
 .omc/
 
