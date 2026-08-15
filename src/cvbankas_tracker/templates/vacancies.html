@@ -5,22 +5,28 @@
   {% if latest_run and latest_run.status == 'partial' %}<p class="badge">PARTIAL RUN: latest inbox results came from an incomplete collection.</p>{% endif %}
   <p class="muted">Threshold {{ preferences.minimum_score }}, below-threshold {% if preferences.hide_below_threshold %}hidden{% else %}shown{% endif %}, sorted by {{ preferences.sort_by }}.</p>
   {% if items %}
-  <table>
-    <thead><tr><th>Score</th><th>Fit</th><th>New</th><th>Status</th><th>Vacancy</th><th>Explanation</th><th>Original</th></tr></thead>
-    <tbody>
+  <div class="vac-list">
     {% for item in items %}
-      <tr>
-        <td>{{ item.latest_score if item.latest_score is not none else '-' }}</td>
-        <td>{{ item.latest_fit_label or '-' }}</td>
-        <td>{{ 'yes' if item.is_new_in_run else '-' }}</td>
-        <td>{{ item.application_status.value if item.application_status else '-' }}</td>
-        <td><a href="/vacancy?url={{ item.source_url|urlencode }}">{{ item.title }}</a><br><span class="muted">{{ item.company }} · {{ item.location }} · {{ item.source_name }}</span></td>
-        <td>{{ item.explanation or '-' }}</td>
-        <td><a href="{{ item.source_url|safe_external_url }}" rel="noopener noreferrer">open</a></td>
-      </tr>
+    <article class="vac">
+      <div class="vac-head">
+        <div>
+          <a class="vac-title" href="/vacancy?url={{ item.source_url|urlencode }}">{{ item.title }}</a>
+          <div class="vac-sub">{{ item.company }} · {{ item.location }} · {{ item.source_name }}</div>
+        </div>
+        <div class="vac-meta">
+          {% if item.latest_score is not none %}<span class="score">{{ item.latest_score }}<small>/100</small></span>{% endif %}
+          {% if item.latest_fit_label %}<span class="badge fit-{{ item.latest_fit_label|lower }}">{{ item.latest_fit_label }}</span>{% endif %}
+        </div>
+      </div>
+      {% if item.explanation %}<p class="vac-why">{{ item.explanation }}</p>{% endif %}
+      <div class="vac-foot">
+        {% if item.is_new_in_run %}<span class="badge">New</span>{% endif %}
+        <span class="muted">{{ item.application_status.value if item.application_status else 'Not tracked' }}</span>
+        <a href="{{ item.source_url|safe_external_url }}" rel="noopener noreferrer">Open original ↗</a>
+      </div>
+    </article>
     {% endfor %}
-    </tbody>
-  </table>
+  </div>
   {% else %}<p class="muted">No vacancies match the current filters.</p>{% endif %}
 </section>
 {% endblock %}

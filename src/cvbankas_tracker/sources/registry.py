@@ -25,9 +25,13 @@ def build_source_registry(
     source_options: Mapping[str, object] | None = None,
 ) -> dict[str, VacancySource]:
     hh_source = HhHtmlSource.from_options(_options_for_source(source_options, "hh"))
-    justjoin_source = JustJoinItSource()
-    startup_jobs_source = StartupJobsSource()
-    euremotejobs_source = EuRemoteJobsSource()
+    justjoin_source = JustJoinItSource.from_options(_options_for_source(source_options, "justjoin"))
+    startup_jobs_source = StartupJobsSource.from_options(
+        _options_for_source(source_options, "startup_jobs")
+    )
+    euremotejobs_source = EuRemoteJobsSource.from_options(
+        _options_for_source(source_options, "euremotejobs")
+    )
     return {
         "cvbankas": CvbankasSource(),
         "euremotejobs": euremotejobs_source,

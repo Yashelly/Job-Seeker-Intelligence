@@ -8,7 +8,43 @@ from typing import Protocol
 
 from openai import OpenAI
 
+from .ai_cli import parse_json_response, run_claude_cli, run_codex_cli
 from .models import Vacancy
+
+EXTRACTION_SYSTEM_PROMPT = (
+    "You extract structured job-vacancy fields from one job vacancy. "
+    "Prefer concrete facts from the provided vacancy text. "
+    "Return JSON with keys: company, location, salary_text, "
+    "requirements, responsibilities, notes. "
+    "If a field is unavailable, return an empty string or empty list. "
+    "Requirements and responsibilities must be concise lists of plain-text items."
+)
+
+
+def build_extraction_prompt_payload(vacancy: Vacancy, visible_text: str) -> dict[str, object]:
+    return {
+        "current_fields": {
+            "source": vacancy.source_name,
+            "title": vacancy.title,
+            "company": vacancy.company,
+            "location": vacancy.location,
+            "salary_text": vacancy.salary_text,
+            "requirements": vacancy.requirements,
+            "responsibilities": vacancy.responsibilities,
+        },
+        "vacancy_text": visible_text,
+    }
+
+
+def normalize_extraction_result(data: dict[str, object]) -> dict[str, object]:
+    return {
+        "company": str(data.get("company", "")).strip(),
+        "location": str(data.get("location", "")).strip(),
+        "salary_text": str(data.get("salary_text", "")).strip(),
+        "requirements": list(data.get("requirements", [])),
+        "responsibilities": list(data.get("responsibilities", [])),
+        "notes": str(data.get("notes", "")).strip(),
+    }
 
 
 class AIVacancyExtractionClient(Protocol):
@@ -38,18 +74,7 @@ class OpenAIVacancyExtractionClient:
         self._model = model
 
     def extract(self, vacancy: Vacancy, visible_text: str) -> dict[str, object]:
-        prompt = {
-            "current_fields": {
-                "source": vacancy.source_name,
-                "title": vacancy.title,
-                "company": vacancy.company,
-                "location": vacancy.location,
-                "salary_text": vacancy.salary_text,
-                "requirements": vacancy.requirements,
-                "responsibilities": vacancy.responsibilities,
-            },
-            "vacancy_text": visible_text,
-        }
+        prompt = build_extraction_prompt_payload(vacancy, visible_text)
 
         completion = self._client.chat.completions.create(
             model=self._model,
@@ -58,14 +83,7 @@ class OpenAIVacancyExtractionClient:
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "You extract structured job-vacancy fields from one job vacancy. "
-                        "Prefer concrete facts from the provided vacancy text. "
-                        "Return JSON with keys: company, location, salary_text, "
-                        "requirements, responsibilities, notes. "
-                        "If a field is unavailable, return an empty string or empty list. "
-                        "Requirements and responsibilities must be concise lists of plain-text items."
-                    ),
+                    "content": EXTRACTION_SYSTEM_PROMPT,
                 },
                 {
                     "role": "user",
@@ -75,14 +93,46 @@ class OpenAIVacancyExtractionClient:
         )
         raw_content = completion.choices[0].message.content or "{}"
         data = json.loads(raw_content)
-        return {
-            "company": str(data.get("company", "")).strip(),
-            "location": str(data.get("location", "")).strip(),
-            "salary_text": str(data.get("salary_text", "")).strip(),
-            "requirements": list(data.get("requirements", [])),
-            "responsibilities": list(data.get("responsibilities", [])),
-            "notes": str(data.get("notes", "")).strip(),
-        }
+        return normalize_extraction_result(data)
+
+
+class _CLIVacancyExtractionClient:
+    """Base for CLI-subscription-backed extraction clients (Claude Code / Codex)."""
+
+    def __init__(self, *, command: str, model: str | None) -> None:
+        self._command = command
+        self._model = model
+
+    def _run_cli(self, prompt: str) -> str:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    def extract(self, vacancy: Vacancy, visible_text: str) -> dict[str, object]:
+        payload = build_extraction_prompt_payload(vacancy, visible_text)
+        prompt = (
+            f"{EXTRACTION_SYSTEM_PROMPT}\n\n"
+            "INPUT (current fields and raw vacancy text as JSON):\n"
+            f"{json.dumps(payload, ensure_ascii=False)}\n\n"
+            "Respond with ONLY the JSON object, no prose and no markdown fences."
+        )
+        raw = self._run_cli(prompt)
+        data = parse_json_response(raw)
+        return normalize_extraction_result(data)
+
+
+class ClaudeCLIVacancyExtractionClient(_CLIVacancyExtractionClient):
+    def __init__(self, *, command: str = "claude", model: str | None = None) -> None:
+        super().__init__(command=command, model=model)
+
+    def _run_cli(self, prompt: str) -> str:
+        return run_claude_cli(prompt, command=self._command, model=self._model)
+
+
+class CodexCLIVacancyExtractionClient(_CLIVacancyExtractionClient):
+    def __init__(self, *, command: str = "codex", model: str | None = None) -> None:
+        super().__init__(command=command, model=model)
+
+    def _run_cli(self, prompt: str) -> str:
+        return run_codex_cli(prompt, command=self._command, model=self._model)
 
 
 class VacancyAIEnrichmentService:

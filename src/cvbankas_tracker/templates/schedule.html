@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Daily schedule</h2>
+  <p class="muted">While this dashboard is running, it collects vacancies at the time below and sends a Telegram summary of new results. No Windows Task Scheduler needed.</p>
+
+  {% if telegram_ready %}
+  <p class="muted">Telegram: <strong>configured</strong> (bot token and chat id are set).</p>
+  {% else %}
+  <p class="error">Telegram is not fully configured. Set <code>TELEGRAM_BOT_TOKEN</code> and <code>TELEGRAM_CHAT_ID</code> in <code>.env</code> so the daily summary can be delivered.</p>
+  {% endif %}
+
+  <div class="card">
+    <p><strong>Status:</strong> {{ 'enabled' if schedule.enabled else 'disabled' }}</p>
+    <p><strong>Next run:</strong> {{ schedule.next_run_at }} (local)</p>
+    <p><strong>Last attempt:</strong>
+      {% if schedule.last_run_at %}{{ schedule.last_run_at }} — {{ schedule.last_status }}{% if schedule.last_job_id %} (<a href="/jobs/{{ schedule.last_job_id }}">job {{ schedule.last_job_id }}</a>){% endif %}{% else %}none yet{% endif %}
+    </p>
+  </div>
+
+  <form method="post" action="/schedule/save">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <label class="inline"><input type="checkbox" name="enabled" value="on"{% if schedule.enabled %} checked{% endif %}> Enable the daily run</label>
+
+    <div class="row">
+      <div>
+        <label for="time">Run at (24h, local)</label>
+        <input id="time" name="time" type="time" value="{{ schedule.time }}" required>
+      </div>
+      <div>
+        <label for="limit">Max vacancies per source</label>
+        <input id="limit" name="limit" type="number" min="1" value="{{ schedule.limit }}">
+      </div>
+      <div>
+        <label for="max_pages">Listing pages per source</label>
+        <input id="max_pages" name="max_pages" type="number" min="1" value="{{ schedule.max_pages }}">
+      </div>
+      <div>
+        <label for="analysis_strategy">Analysis</label>
+        <select id="analysis_strategy" name="analysis_strategy">
+          {% for strategy in strategies %}
+          <option value="{{ strategy }}"{% if strategy == schedule.analysis_strategy %} selected{% endif %}>{{ 'AI (uses active backend)' if strategy == 'ai' else 'Rule-based (offline)' }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <fieldset>
+      <legend>Sources</legend>
+      {% for source in sources %}
+      <label class="inline"><input type="checkbox" name="source_{{ source }}" value="on"{% if source in schedule.sources %} checked{% endif %}> {{ source }}</label>
+      {% endfor %}
+    </fieldset>
+
+    <label for="keywords">Keywords (one per line; leave empty to use config defaults)</label>
+    <textarea id="keywords" name="keywords" rows="4" placeholder="python developer&#10;automation">{{ schedule.keywords | join('\n') }}</textarea>
+
+    <button type="submit">Save schedule</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Run now</h2>
+  <p class="muted">Trigger the same daily collection + Telegram summary immediately, without waiting for the scheduled time.</p>
+  <form method="post" action="/schedule/run-now">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Run daily job now</button>
+  </form>
+</section>
+{% endblock %}

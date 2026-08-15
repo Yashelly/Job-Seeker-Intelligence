@@ -28,7 +28,14 @@ config/*.private.yml
 *.db.*.bak
 *.sqlite3.bak
 *.sqlite3.*.bak
+*.bak-journal
 *.bootstrap.lock
+
+# Local dashboard scheduler state
+config/scheduler.json
+
+# Tooling scratch
+.omc/
 
 # Generated runtime output
 logs/

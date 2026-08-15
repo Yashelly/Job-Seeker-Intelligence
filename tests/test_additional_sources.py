@@ -171,5 +171,69 @@ class AdditionalSourcesTests(unittest.TestCase):
         )
 
 
+class BrowserModeTests(unittest.TestCase):
+    _CF_SCRIPT = '<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/x.js"></script>'
+
+    def test_from_options_enables_browser_mode(self) -> None:
+        source = StartupJobsSource.from_options({"fetch_mode": "browser"})
+        self.assertTrue(source._uses_browser())
+        self.assertEqual(EuRemoteJobsSource.from_options({}).fetch_mode, "http")
+        self.assertEqual(StartupJobsSource().fetch_mode, "http")
+
+    def test_looks_blocked_ignores_benign_cloudflare_script(self) -> None:
+        source = StartupJobsSource()
+        page = f"<html><head>{self._CF_SCRIPT}</head><body><a href='/role-123'>Job</a></body></html>"
+        self.assertFalse(source._looks_blocked(page))
+
+    def test_looks_blocked_detects_real_interstitial(self) -> None:
+        source = StartupJobsSource()
+        self.assertTrue(
+            source._looks_blocked("<html><body>Just a moment... Checking your browser</body></html>")
+        )
+
+    def test_collect_does_not_flag_blocked_when_links_present(self) -> None:
+        source = StartupJobsSource()
+        page = (
+            f"<html><head>{self._CF_SCRIPT}</head>"
+            '<body><a href="/ai-workflow-automation-specialist-123456">Job</a></body></html>'
+        )
+        with patch.object(source, "fetch_vacancy_page", return_value=page):
+            urls, _ = source.collect_vacancy_urls(keyword="ai automation", max_pages=1)
+        self.assertEqual(urls, ["https://startup.jobs/ai-workflow-automation-specialist-123456"])
+
+    def test_browser_mode_routes_fetch_through_browser(self) -> None:
+        source = EuRemoteJobsSource.from_options({"fetch_mode": "browser"})
+        with patch.object(source, "_browser_fetcher") as fetcher:
+            fetcher.return_value.fetch_html.return_value = "<html>ok</html>"
+            result = source.fetch_vacancy_page("https://euremotejobs.com/job/x/")
+        self.assertEqual(result, "<html>ok</html>")
+        fetcher.return_value.fetch_html.assert_called_once_with("https://euremotejobs.com/job/x/")
+
+    def test_close_releases_browser(self) -> None:
+        source = StartupJobsSource.from_options({"fetch_mode": "browser"})
+
+        class _FakeBrowser:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        fake = _FakeBrowser()
+        source._browser = fake
+        source.close()
+        self.assertTrue(fake.closed)
+        self.assertIsNone(source._browser)
+
+    def test_registry_passes_browser_options_from_config(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        (source,) = resolve_sources(
+            ["startup_jobs"],
+            data_dir=root / "sample_data",
+            source_options={"startup_jobs": {"fetch_mode": "browser"}},
+        )
+        self.assertTrue(source._uses_browser())
+
+
 if __name__ == "__main__":
     unittest.main()

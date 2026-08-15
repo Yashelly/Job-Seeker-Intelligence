@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Run a vacancy search</h2>
+  <p class="muted">Collects vacancies from the selected sources, analyzes, and stores them. Runs in the background — you can watch the live log.</p>
+  <form method="post" action="/search/start">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <fieldset>
+      <legend>Sources</legend>
+      {% for source in sources %}
+      <label class="inline"><input type="checkbox" name="source_{{ source }}" value="on"{% if source in default_sources %} checked{% endif %}> {{ source }}</label>
+      {% endfor %}
+    </fieldset>
+
+    <label for="keywords">Keywords (one per line, or comma/semicolon separated)</label>
+    <textarea id="keywords" name="keywords" rows="4" placeholder="python developer&#10;automation&#10;fastapi"></textarea>
+
+    <div class="row">
+      <div>
+        <label for="limit">Max vacancies per source</label>
+        <input id="limit" name="limit" type="number" min="1" value="{{ default_limit }}">
+      </div>
+      <div>
+        <label for="max_pages">Listing pages per source</label>
+        <input id="max_pages" name="max_pages" type="number" min="1" value="{{ default_pages }}">
+      </div>
+      <div>
+        <label for="analysis_strategy">Analysis</label>
+        <select id="analysis_strategy" name="analysis_strategy">
+          <option value="ai">AI (uses active backend)</option>
+          <option value="rule">Rule-based (offline)</option>
+        </select>
+      </div>
+    </div>
+
+    <label class="inline"><input type="checkbox" name="refresh" value="on"> Reprocess vacancies already in the database</label>
+    <button type="submit">Start search</button>
+  </form>
+</section>
+{% endblock %}

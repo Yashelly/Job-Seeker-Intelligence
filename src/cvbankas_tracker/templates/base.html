@@ -3,21 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{{ page_title }} · Job Seeker</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v={{ asset_version }}">
 </head>
 <body>
-<header>
-  <h1>{{ page_title }}</h1>
-  <nav aria-label="Main navigation">
-    <a href="/today">Today</a>
-    <a href="/vacancies">Vacancies</a>
-    <a href="/applications">Applications</a>
-    <a href="/actions">Actions</a>
-    <a href="/settings">Settings</a>
-  </nav>
+{% set current = request.url.path %}
+{% set links = [
+  ('/search', 'Search'),
+  ('/today', 'Today'),
+  ('/vacancies', 'Vacancies'),
+  ('/profile', 'Profile'),
+  ('/applications', 'Applications'),
+  ('/schedule', 'Schedule'),
+  ('/settings', 'Settings'),
+] %}
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/today"><span class="brand-dot" aria-hidden="true"></span>Job Seeker</a>
+    <nav aria-label="Main navigation">
+      {% for href, label in links %}
+      <a href="{{ href }}"{% if current == href or (href != '/' and current.startswith(href)) %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+  </div>
 </header>
 <main>
+  <h1 class="page-title">{{ page_title }}</h1>
   {% block content %}{% endblock %}
 </main>
 </body>
