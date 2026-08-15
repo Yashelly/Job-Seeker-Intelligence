@@ -7,6 +7,10 @@ from pathlib import Path
 from .ai_cli import parse_json_response, run_claude_cli, run_codex_cli
 
 CV_TEXT_LIMIT = 24000
+# Upper bound for a CV upload accepted over the web dashboard. Real resumes are
+# far smaller; the cap stops a huge file from being buffered into memory before
+# the prompt itself is truncated to CV_TEXT_LIMIT.
+MAX_CV_UPLOAD_BYTES = 5 * 1024 * 1024
 SUPPORTED_CV_SUFFIXES = (".txt", ".md", ".pdf", ".docx")
 AI_PROFILE_BACKENDS = ("openai", "claude_cli", "codex_cli")
 
