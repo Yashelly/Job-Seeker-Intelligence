@@ -9,7 +9,13 @@ from typing import Protocol
 
 from openai import OpenAI
 
-from .ai_cli import parse_json_response, run_claude_cli, run_codex_cli
+from .ai_cli import (
+    coerce_score,
+    coerce_str_list,
+    parse_json_response,
+    run_claude_cli,
+    run_codex_cli,
+)
 from .models import AnalysisMethod, FitLabel, UserProfile, Vacancy, VacancyAnalysis
 
 ANALYSIS_SYSTEM_PROMPT = (
@@ -62,13 +68,22 @@ def _coerce_fit_label(raw_label: object, score: int) -> str:
 
 
 def normalize_analysis_result(data: dict[str, object]) -> dict[str, object]:
-    score = int(data.get("score", 0))
+    """Coerce raw model output into a schema-valid analysis dict.
+
+    Model responses are untrusted: the score may be a string or out of range,
+    the label may be absent or bogus, and the point lists may be scalars or
+    contain non-strings. Every field is coerced defensively so a malformed
+    response degrades gracefully instead of raising downstream.
+    """
+    if not isinstance(data, dict):
+        data = {}
+    score = coerce_score(data.get("score", 0))
     return {
         "score": score,
         "fit_label": _coerce_fit_label(data.get("fit_label", ""), score),
         "explanation": str(data.get("explanation", "")).strip(),
-        "matched_points": list(data.get("matched_points", [])),
-        "missing_points": list(data.get("missing_points", [])),
+        "matched_points": coerce_str_list(data.get("matched_points")),
+        "missing_points": coerce_str_list(data.get("missing_points")),
         "notes": str(data.get("notes", "")).strip(),
     }
 
@@ -416,8 +431,7 @@ class OpenAIAnalysisClient:
             ],
         )
         raw_content = completion.choices[0].message.content or "{}"
-        data = json.loads(raw_content)
-        return normalize_analysis_result(data)
+        return normalize_analysis_result(parse_json_response(raw_content))
 
 
 class _CLIAnalysisClient:
@@ -494,10 +508,14 @@ class VacancyAnalysisService:
         builder = VacancyAnalysisBuilder()
         try:
             self.primary_strategy.populate_builder(builder, vacancy, profile)
+            # build() is inside the try on purpose: a primary strategy can
+            # populate an *incomplete* builder (e.g. an AI backend that returns
+            # an empty explanation) and only fail at build time. That must fall
+            # back to the deterministic strategy too, not surface to the caller.
+            return builder.build()
         except Exception:
             if self.fallback_strategy is None:
                 raise
             builder.reset()
             self.fallback_strategy.populate_builder(builder, vacancy, profile)
-
-        return builder.build()
+            return builder.build()
