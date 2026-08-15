@@ -8,23 +8,26 @@ import sqlite3
 import sys
 import textwrap
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 import yaml
 
 from .analysis import (
     AIBasedAnalysisStrategy,
+    ClaudeCLIAnalysisClient,
+    CodexCLIAnalysisClient,
     DemoAIAnalysisClient,
     OpenAIAnalysisClient,
     RuleBasedAnalysisStrategy,
     VacancyAnalysisService,
 )
 from .extraction import (
+    ClaudeCLIVacancyExtractionClient,
+    CodexCLIVacancyExtractionClient,
     DemoAIVacancyExtractionClient,
     OpenAIVacancyExtractionClient,
     VacancyAIEnrichmentService,
@@ -40,7 +43,12 @@ from .models import (
     VacancyAnalysis,
 )
 from .sources import VacancySource, resolve_sources
-from .storage import CollectionRunAlreadyActive, DatabaseManager, canonicalize_source_url, resolve_database_path
+from .storage import (
+    CollectionRunAlreadyActive,
+    DatabaseManager,
+    canonicalize_source_url,
+    resolve_database_path,
+)
 from .telegram import (
     TelegramNotificationError,
     TelegramNotifier,
@@ -599,12 +607,40 @@ def resolve_source_for_import_url(
     raise ValueError(f"No enabled source can handle URL: {url}. Enabled sources: {available}.")
 
 
+def resolve_ai_backend() -> str:
+    """Return the configured AI backend.
+
+    ``AI_BACKEND`` accepts ``claude_cli``, ``codex_cli``, ``openai``, ``demo``, or ``rule``.
+    When unset: OpenAI if a key is present, otherwise honest rule-based keyword scoring
+    (``demo`` remains available explicitly for the score-boosting offline showcase client).
+    """
+    backend = (os.getenv("AI_BACKEND") or "").strip().lower()
+    if backend in {"claude_cli", "codex_cli", "openai", "demo", "rule"}:
+        return backend
+    if (os.getenv("OPENAI_API_KEY") or "").strip():
+        return "openai"
+    return "rule"
+
+
+def _optional_env(name: str) -> str | None:
+    value = (os.getenv(name) or "").strip()
+    return value or None
+
+
 def build_analysis_service(strategy_name: str, openai_model: str) -> VacancyAnalysisService:
     fallback = RuleBasedAnalysisStrategy()
     if strategy_name == "rule":
         return VacancyAnalysisService(primary_strategy=fallback)
 
-    if (os.getenv("OPENAI_API_KEY") or "").strip():
+    backend = resolve_ai_backend()
+    if backend == "rule":
+        return VacancyAnalysisService(primary_strategy=fallback)
+
+    if backend == "claude_cli":
+        ai_client = ClaudeCLIAnalysisClient(model=_optional_env("CLAUDE_CLI_MODEL"))
+    elif backend == "codex_cli":
+        ai_client = CodexCLIAnalysisClient(model=_optional_env("CODEX_CLI_MODEL"))
+    elif backend == "openai":
         ai_client = OpenAIAnalysisClient(model=openai_model)
     else:
         ai_client = DemoAIAnalysisClient()
@@ -620,7 +656,12 @@ def build_extraction_service(
     *,
     use_openai: bool = True,
 ) -> VacancyAIEnrichmentService:
-    if use_openai and (os.getenv("OPENAI_API_KEY") or "").strip():
+    backend = resolve_ai_backend() if use_openai else "demo"
+    if backend == "claude_cli":
+        client = ClaudeCLIVacancyExtractionClient(model=_optional_env("CLAUDE_CLI_MODEL"))
+    elif backend == "codex_cli":
+        client = CodexCLIVacancyExtractionClient(model=_optional_env("CODEX_CLI_MODEL"))
+    elif backend == "openai":
         client = OpenAIVacancyExtractionClient(model=openai_model)
     else:
         client = DemoAIVacancyExtractionClient()
@@ -1733,7 +1774,13 @@ def main() -> int:
     if args.web:
         from .web import run_web
 
-        return run_web(args.db, host=args.web_host, port=args.web_port)
+        return run_web(
+            args.db,
+            host=args.web_host,
+            port=args.web_port,
+            cfg=cfg,
+            profile_path=args.profile,
+        )
 
     if args.tui or open_tui_by_default:
         from .tui import run_tui

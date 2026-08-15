@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Active profile</h2>
+  <p class="muted">Path: {{ active_path }} · AI backend: <strong>{{ backend }}</strong></p>
+  {% if active_profile %}
+  <table>
+    <tbody>
+      <tr><th>Name</th><td>{{ active_profile.name }}</td></tr>
+      <tr><th>Experience</th><td>{{ active_profile.experience_level }}{% if active_profile.years_of_experience is not none %} · {{ active_profile.years_of_experience }} yrs{% endif %}</td></tr>
+      <tr><th>Target roles</th><td>{{ active_profile.target_roles|join(', ') }}</td></tr>
+      <tr><th>Skills</th><td>{{ active_profile.skills|join(', ') }}</td></tr>
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No valid active profile loaded.</p>
+  {% endif %}
+</section>
+
+{% include "_backend_form.html" %}
+
+<section class="card">
+  <h2>Build profile from CV</h2>
+  {% if backend not in ai_backends %}
+  <p class="error">Building a profile from a CV needs an AI backend ({{ ai_backends|join(', ') }}). Current backend: {{ backend }}. Set AI_BACKEND=claude_cli or codex_cli, or AI_BACKEND=openai with OPENAI_API_KEY.</p>
+  {% else %}
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <p class="muted">Upload your CV ({{ supported_suffixes|join(', ') }}). The {{ backend }} backend will extract roles, skills, and keywords.</p>
+  <form method="post" action="/profile/build" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="cv_file">CV file</label>
+    <input id="cv_file" name="cv_file" type="file" required accept=".pdf,.docx,.txt,.md">
+    <button type="submit">Generate profile</button>
+  </form>
+  {% endif %}
+</section>
+
+{% if generated %}
+<section class="card">
+  <h2>Generated profile — review and save</h2>
+  <table>
+    <tbody>
+      <tr><th>Name</th><td>{{ generated.name }}</td></tr>
+      <tr><th>Experience</th><td>{{ generated.experience_level }}{% if generated.years_of_experience is not none %} · {{ generated.years_of_experience }} yrs{% endif %}</td></tr>
+      <tr><th>Salary</th><td>{{ generated.salary_expectation or '-' }}</td></tr>
+      <tr><th>Target roles</th><td>{{ generated.target_roles|join(', ') }}</td></tr>
+      <tr><th>Skills</th><td>{{ generated.skills|join(', ') }}</td></tr>
+      <tr><th>Must-have</th><td>{{ generated.must_have_skills|join(', ') }}</td></tr>
+      <tr><th>Nice-to-have</th><td>{{ generated.nice_to_have_skills|join(', ') }}</td></tr>
+      <tr><th>Locations</th><td>{{ generated.preferred_locations|join(', ') }}</td></tr>
+      <tr><th>Excluded</th><td>{{ generated.excluded_keywords|join(', ') }}</td></tr>
+      <tr><th>Extra keywords</th><td>{{ generated.additional_keywords|join(', ') }}</td></tr>
+    </tbody>
+  </table>
+  <form method="post" action="/profile/save">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="profile_json" value="{{ generated_json }}">
+    <label for="save_path">Save to</label>
+    <input id="save_path" name="save_path" value="{{ default_save_path }}">
+    <p class="muted">Tip: enter {{ active_path }} to replace your active profile.</p>
+    <label class="inline"><input type="checkbox" name="make_active" value="on"> Make this the active profile for this session</label>
+    <button type="submit">Save profile</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Import vacancy URLs</h2>
+  <p class="muted">Paste direct vacancy links. Each is fetched, analyzed against your active profile, and stored. Runs in the background.</p>
+  <form method="post" action="/import/start">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="import_urls">Vacancy URLs (separated by newlines, spaces or commas)</label>
+    <textarea id="import_urls" name="import_urls" rows="5" required placeholder="https://www.cvbankas.lt/...&#10;https://justjoin.it/..."></textarea>
+    <div class="row">
+      <div>
+        <label for="analysis_strategy">Analysis</label>
+        <select id="analysis_strategy" name="analysis_strategy">
+          <option value="ai">AI (uses active backend)</option>
+          <option value="rule">Rule-based (offline)</option>
+        </select>
+      </div>
+    </div>
+    <label class="inline"><input type="checkbox" name="refresh" value="on"> Reprocess URLs already in the database</label>
+    <button type="submit">Import URLs</button>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>{{ job.kind|title }} job #{{ job.id }}</h2>
+  <p>Status: <strong id="job-status">{{ job.status }}</strong> <span id="job-exit" class="muted"></span></p>
+  <pre id="job-log" class="log">{{ job.log }}</pre>
+  <p id="job-done" class="muted" hidden>
+    Finished. <a href="/vacancies">View vacancies</a> · <a href="/today">Today</a>
+  </p>
+</section>
+<script>
+(function () {
+  var jobId = {{ job.id }};
+  var statusEl = document.getElementById("job-status");
+  var exitEl = document.getElementById("job-exit");
+  var logEl = document.getElementById("job-log");
+  var doneEl = document.getElementById("job-done");
+
+  function poll() {
+    fetch("/jobs/" + jobId + "/log", { headers: { "Accept": "application/json" } })
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        statusEl.textContent = data.status;
+        logEl.textContent = data.log || "";
+        logEl.scrollTop = logEl.scrollHeight;
+        if (data.status === "running") {
+          setTimeout(poll, 1500);
+        } else {
+          if (data.exit_code !== null && data.exit_code !== undefined) {
+            exitEl.textContent = "(exit code " + data.exit_code + ")";
+          }
+          doneEl.hidden = false;
+        }
+      })
+      .catch(function () { setTimeout(poll, 3000); });
+  }
+  poll();
+})();
+</script>
+{% endblock %}

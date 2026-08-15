@@ -9,6 +9,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from ..models import Vacancy
+from .browser_fetch import BrowserFetcher
 
 
 class GenericHtmlJobSource:
@@ -45,6 +46,68 @@ class GenericHtmlJobSource:
     )
 
     _GENERIC_LINK_PATTERN = re.compile(r'href="(?P<url>[^"]+)"', re.IGNORECASE)
+
+    def __init__(
+        self,
+        *,
+        fetch_mode: str | None = None,
+        browser_headless: bool = True,
+        browser_executable_path: str = "",
+        browser_locale: str = "en-US",
+        browser_wait_ms: int = 2500,
+        browser_timeout_ms: int = 30000,
+        browser_fresh_context: bool = False,
+    ) -> None:
+        self.fetch_mode = self._normalize_fetch_mode(fetch_mode or "http")
+        self.browser_headless = bool(browser_headless)
+        self.browser_executable_path = browser_executable_path
+        self.browser_locale = browser_locale
+        self.browser_wait_ms = int(browser_wait_ms)
+        self.browser_timeout_ms = int(browser_timeout_ms)
+        self.browser_fresh_context = bool(browser_fresh_context)
+        self._browser: BrowserFetcher | None = None
+
+    @classmethod
+    def from_options(cls, options: dict | None = None) -> GenericHtmlJobSource:
+        options = options or {}
+        return cls(
+            fetch_mode=str(options.get("fetch_mode", options.get("mode", "http"))),
+            browser_headless=bool(options.get("browser_headless", True)),
+            browser_executable_path=str(options.get("browser_executable_path", "")),
+            browser_locale=str(options.get("browser_locale", "en-US")),
+            browser_wait_ms=int(options.get("browser_wait_ms", 2500)),
+            browser_timeout_ms=int(options.get("browser_timeout_ms", 30000)),
+            browser_fresh_context=bool(options.get("browser_fresh_context", False)),
+        )
+
+    @staticmethod
+    def _normalize_fetch_mode(value: str) -> str:
+        normalized = str(value or "http").strip().lower()
+        if normalized in {"1", "true", "yes", "on", "browser", "playwright"}:
+            return "browser"
+        if normalized in {"0", "false", "no", "off", "http", "html", "urllib"}:
+            return "http"
+        raise ValueError(f"Unsupported fetch mode: {value}")
+
+    def _uses_browser(self) -> bool:
+        return getattr(self, "fetch_mode", "http") == "browser"
+
+    def _browser_fetcher(self) -> BrowserFetcher:
+        if self._browser is None:
+            self._browser = BrowserFetcher(
+                headless=self.browser_headless,
+                executable_path=self.browser_executable_path,
+                locale=self.browser_locale,
+                wait_ms=self.browser_wait_ms,
+                timeout_ms=self.browser_timeout_ms,
+                fresh_context=self.browser_fresh_context,
+            )
+        return self._browser
+
+    def close(self) -> None:
+        if getattr(self, "_browser", None) is not None:
+            self._browser.close()
+            self._browser = None
 
     def build_listing_url(self, keyword: str | None = None, page: int | None = None) -> str:
         page_value = self.first_page if page is None else page
@@ -83,9 +146,12 @@ class GenericHtmlJobSource:
             if before_listing_fetch is not None:
                 before_listing_fetch(page_url)
             listing_html = self.fetch_vacancy_page(page_url)
-            if self._looks_blocked(listing_html):
+            page_vacancy_urls = self.collect_listing_urls(listing_html)
+            if not page_vacancy_urls and self._looks_blocked(listing_html):
+                if collected_urls:
+                    break
                 raise ValueError(f"{self.name} listing page is not publicly accessible.")
-            for vacancy_url in self.collect_listing_urls(listing_html):
+            for vacancy_url in page_vacancy_urls:
                 if vacancy_url in seen:
                     continue
                 seen.add(vacancy_url)
@@ -111,6 +177,9 @@ class GenericHtmlJobSource:
         parsed = urlparse(url)
         if parsed.scheme and parsed.scheme not in {"http", "https", "file"}:
             raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+
+        if self._uses_browser() and parsed.scheme in {"http", "https"}:
+            return self._browser_fetcher().fetch_html(url)
 
         request_url: str | Request = url
         if parsed.scheme in {"http", "https"}:
@@ -332,16 +401,20 @@ class GenericHtmlJobSource:
         return ""
 
     def _looks_blocked(self, html_text: str) -> bool:
-        lowered = html_text.lower()
+        # Inspect visible text only: Cloudflare injects a benign
+        # /cdn-cgi/challenge-platform/ script tag on pages it lets through, so
+        # matching raw HTML would false-positive on real content served via the
+        # browser fetcher. A genuine challenge shows one of these phrases.
+        visible = self._clean_text(html_text).lower()
         return any(
-            marker in lowered
+            marker in visible
             for marker in (
                 "access denied",
-                "challenge-platform",
+                "just a moment",
+                "checking your browser",
+                "verify you are human",
                 "sgcaptcha",
                 "temporarily unavailable",
-                "verify you are human",
-                "checking your browser",
             )
         )
 

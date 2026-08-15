@@ -14,6 +14,9 @@ class DependencyPinTests(unittest.TestCase):
             '"Jinja2==3.1.6"',
             '"uvicorn==0.52.1"',
             '"httpx==0.28.1"',
+            '"pypdf==6.16.0"',
+            '"python-docx==1.2.0"',
+            '"python-multipart==0.0.32"',
         ):
             self.assertIn(requirement, text)
         self.assertNotIn('"starlette', text.lower())

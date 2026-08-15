@@ -9,7 +9,68 @@ from typing import Protocol
 
 from openai import OpenAI
 
+from .ai_cli import parse_json_response, run_claude_cli, run_codex_cli
 from .models import AnalysisMethod, FitLabel, UserProfile, Vacancy, VacancyAnalysis
+
+ANALYSIS_SYSTEM_PROMPT = (
+    "You analyze job vacancies against one user profile. "
+    "Use role fit, must-have skills, nice-to-have skills, excluded keywords, "
+    "experience fit, location fit, and salary fit when deciding the score. "
+    "Strong technical matches should score clearly higher than loosely related roles. "
+    "Return JSON with keys: score, fit_label, explanation, "
+    "matched_points, missing_points, notes. "
+    "score is an integer from 0 to 100. "
+    'fit_label MUST be exactly one of "High", "Medium", or "Low" '
+    "(High for score >= 75, Medium for 45-74, Low below 45)."
+)
+
+
+def build_analysis_prompt_payload(vacancy: Vacancy, profile: UserProfile) -> dict[str, object]:
+    return {
+        "vacancy": {
+            "source": vacancy.source_name,
+            "title": vacancy.title,
+            "company": vacancy.company,
+            "location": vacancy.location,
+            "salary_text": vacancy.salary_text,
+            "requirements": vacancy.requirements,
+            "responsibilities": vacancy.responsibilities,
+        },
+        "profile": {
+            "name": profile.name,
+            "target_roles": profile.target_roles,
+            "skills": profile.skills,
+            "must_have_skills": profile.must_have_skills,
+            "nice_to_have_skills": profile.nice_to_have_skills,
+            "excluded_keywords": profile.excluded_keywords,
+            "preferred_locations": profile.preferred_locations,
+            "experience_level": profile.experience_level,
+            "years_of_experience": profile.years_of_experience,
+            "salary_expectation": profile.salary_expectation,
+            "additional_keywords": profile.additional_keywords,
+        },
+    }
+
+
+def _coerce_fit_label(raw_label: object, score: int) -> str:
+    """Map a model-provided label to a valid FitLabel, falling back to the score band."""
+    candidate = str(raw_label).strip().lower()
+    for label in FitLabel:
+        if candidate == label.value.lower():
+            return label.value
+    return _label_for_score(score).value
+
+
+def normalize_analysis_result(data: dict[str, object]) -> dict[str, object]:
+    score = int(data.get("score", 0))
+    return {
+        "score": score,
+        "fit_label": _coerce_fit_label(data.get("fit_label", ""), score),
+        "explanation": str(data.get("explanation", "")).strip(),
+        "matched_points": list(data.get("matched_points", [])),
+        "missing_points": list(data.get("missing_points", [])),
+        "notes": str(data.get("notes", "")).strip(),
+    }
 
 
 class AIAnalysisClient(Protocol):
@@ -31,35 +92,35 @@ class VacancyAnalysisBuilder:
         self._missing_points: list[str] = []
         self._notes: str = ""
 
-    def with_vacancy_source_url(self, source_url: str) -> "VacancyAnalysisBuilder":
+    def with_vacancy_source_url(self, source_url: str) -> VacancyAnalysisBuilder:
         self._vacancy_source_url = source_url
         return self
 
-    def with_analysis_method(self, method: AnalysisMethod) -> "VacancyAnalysisBuilder":
+    def with_analysis_method(self, method: AnalysisMethod) -> VacancyAnalysisBuilder:
         self._analysis_method = method
         return self
 
-    def with_score(self, score: int) -> "VacancyAnalysisBuilder":
+    def with_score(self, score: int) -> VacancyAnalysisBuilder:
         self._score = max(0, min(100, score))
         return self
 
-    def with_fit_label(self, label: FitLabel) -> "VacancyAnalysisBuilder":
+    def with_fit_label(self, label: FitLabel) -> VacancyAnalysisBuilder:
         self._fit_label = label
         return self
 
-    def with_explanation(self, explanation: str) -> "VacancyAnalysisBuilder":
+    def with_explanation(self, explanation: str) -> VacancyAnalysisBuilder:
         self._explanation = explanation.strip()
         return self
 
-    def with_matched_points(self, points: list[str]) -> "VacancyAnalysisBuilder":
+    def with_matched_points(self, points: list[str]) -> VacancyAnalysisBuilder:
         self._matched_points = [point.strip() for point in points if point.strip()]
         return self
 
-    def with_missing_points(self, points: list[str]) -> "VacancyAnalysisBuilder":
+    def with_missing_points(self, points: list[str]) -> VacancyAnalysisBuilder:
         self._missing_points = [point.strip() for point in points if point.strip()]
         return self
 
-    def with_notes(self, notes: str) -> "VacancyAnalysisBuilder":
+    def with_notes(self, notes: str) -> VacancyAnalysisBuilder:
         self._notes = notes.strip()
         return self
 
@@ -337,30 +398,7 @@ class OpenAIAnalysisClient:
         self._model = model
 
     def analyze(self, vacancy: Vacancy, profile: UserProfile) -> dict[str, object]:
-        prompt = {
-            "vacancy": {
-                "source": vacancy.source_name,
-                "title": vacancy.title,
-                "company": vacancy.company,
-                "location": vacancy.location,
-                "salary_text": vacancy.salary_text,
-                "requirements": vacancy.requirements,
-                "responsibilities": vacancy.responsibilities,
-            },
-            "profile": {
-                "name": profile.name,
-                "target_roles": profile.target_roles,
-                "skills": profile.skills,
-                "must_have_skills": profile.must_have_skills,
-                "nice_to_have_skills": profile.nice_to_have_skills,
-                "excluded_keywords": profile.excluded_keywords,
-                "preferred_locations": profile.preferred_locations,
-                "experience_level": profile.experience_level,
-                "years_of_experience": profile.years_of_experience,
-                "salary_expectation": profile.salary_expectation,
-                "additional_keywords": profile.additional_keywords,
-            },
-        }
+        prompt = build_analysis_prompt_payload(vacancy, profile)
 
         completion = self._client.chat.completions.create(
             model=self._model,
@@ -369,14 +407,7 @@ class OpenAIAnalysisClient:
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "You analyze job vacancies against one user profile. "
-                        "Use role fit, must-have skills, nice-to-have skills, excluded keywords, "
-                        "experience fit, location fit, and salary fit when deciding the score. "
-                        "Strong technical matches should score clearly higher than loosely related roles. "
-                        "Return JSON with keys: score, fit_label, explanation, "
-                        "matched_points, missing_points, notes."
-                    ),
+                    "content": ANALYSIS_SYSTEM_PROMPT,
                 },
                 {
                     "role": "user",
@@ -386,14 +417,46 @@ class OpenAIAnalysisClient:
         )
         raw_content = completion.choices[0].message.content or "{}"
         data = json.loads(raw_content)
-        return {
-            "score": int(data.get("score", 0)),
-            "fit_label": str(data.get("fit_label", FitLabel.LOW.value)),
-            "explanation": str(data.get("explanation", "")).strip(),
-            "matched_points": list(data.get("matched_points", [])),
-            "missing_points": list(data.get("missing_points", [])),
-            "notes": str(data.get("notes", "")).strip(),
-        }
+        return normalize_analysis_result(data)
+
+
+class _CLIAnalysisClient:
+    """Base for CLI-subscription-backed analysis clients (Claude Code / Codex)."""
+
+    def __init__(self, *, command: str, model: str | None) -> None:
+        self._command = command
+        self._model = model
+
+    def _run_cli(self, prompt: str) -> str:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    def analyze(self, vacancy: Vacancy, profile: UserProfile) -> dict[str, object]:
+        payload = build_analysis_prompt_payload(vacancy, profile)
+        prompt = (
+            f"{ANALYSIS_SYSTEM_PROMPT}\n\n"
+            "INPUT (job vacancy and user profile as JSON):\n"
+            f"{json.dumps(payload, ensure_ascii=False)}\n\n"
+            "Respond with ONLY the JSON object, no prose and no markdown fences."
+        )
+        raw = self._run_cli(prompt)
+        data = parse_json_response(raw)
+        return normalize_analysis_result(data)
+
+
+class ClaudeCLIAnalysisClient(_CLIAnalysisClient):
+    def __init__(self, *, command: str = "claude", model: str | None = None) -> None:
+        super().__init__(command=command, model=model)
+
+    def _run_cli(self, prompt: str) -> str:
+        return run_claude_cli(prompt, command=self._command, model=self._model)
+
+
+class CodexCLIAnalysisClient(_CLIAnalysisClient):
+    def __init__(self, *, command: str = "codex", model: str | None = None) -> None:
+        super().__init__(command=command, model=model)
+
+    def _run_cli(self, prompt: str) -> str:
+        return run_codex_cli(prompt, command=self._command, model=self._model)
 
 
 class AIBasedAnalysisStrategy(AnalysisStrategy):

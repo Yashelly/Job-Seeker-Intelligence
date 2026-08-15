@@ -4,19 +4,23 @@
   <h2 id="fresh-heading">New recommended vacancies</h2>
   {% if latest_run and latest_run.status == 'partial' %}<p class="badge">PARTIAL RUN: latest inbox results came from an incomplete collection.</p>{% endif %}
   {% if inbox_items %}
-  <table>
-    <thead><tr><th>Score</th><th>Fit</th><th>Vacancy</th><th>Why</th></tr></thead>
-    <tbody>
+  <div class="vac-list">
     {% for item in inbox_items %}
-      <tr>
-        <td>{{ item.latest_score if item.latest_score is not none else '-' }}</td>
-        <td>{{ item.latest_fit_label or '-' }}</td>
-        <td><a href="/vacancy?url={{ item.source_url|urlencode }}">{{ item.title }}</a><br><span class="muted">{{ item.company }} · {{ item.source_name }}</span></td>
-        <td>{{ item.explanation or '-' }}</td>
-      </tr>
+    <article class="vac">
+      <div class="vac-head">
+        <div>
+          <a class="vac-title" href="/vacancy?url={{ item.source_url|urlencode }}">{{ item.title }}</a>
+          <div class="vac-sub">{{ item.company }} · {{ item.source_name }}</div>
+        </div>
+        <div class="vac-meta">
+          {% if item.latest_score is not none %}<span class="score">{{ item.latest_score }}<small>/100</small></span>{% endif %}
+          {% if item.latest_fit_label %}<span class="badge fit-{{ item.latest_fit_label|lower }}">{{ item.latest_fit_label }}</span>{% endif %}
+        </div>
+      </div>
+      {% if item.explanation %}<p class="vac-why">{{ item.explanation }}</p>{% endif %}
+    </article>
     {% endfor %}
-    </tbody>
-  </table>
+  </div>
   {% else %}<p class="muted">No new recommendations match the current settings.</p>{% endif %}
 </section>
 <section class="card" aria-labelledby="reminders-heading">

@@ -77,12 +77,11 @@ class G005WebDashboardTests(unittest.TestCase):
                     ("/vacancies", "Vacancies"),
                     (f"/vacancy?url={vacancy_url}", "Web Automation Engineer"),
                     ("/applications", "Applications"),
-                    ("/actions", "Actions"),
                     ("/settings", "Settings"),
                 ]:
                     response = client.get(path)
                     self.assertEqual(response.status_code, 200, path)
-                    self.assertIn(f"<h1>{heading}", response.text)
+                    self.assertIn(f">{heading}</h1>", response.text)
                 self.assertIn("Strong server fit.", client.get("/vacancies").text)
                 self.assertIn("Follow up", client.get("/actions").text)
 

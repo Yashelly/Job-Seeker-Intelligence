@@ -1,0 +1,17 @@
+<section class="card">
+  <h2>AI backend</h2>
+  <p class="muted">Active: <strong>{{ backend }}</strong>. Controls analysis, extraction, and CV&rarr;profile for search, import, and profile building.</p>
+  <form method="post" action="/settings/backend">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ backend_form_next or '/settings' }}">
+    <label for="ai_backend">Backend</label>
+    <select id="ai_backend" name="ai_backend">
+      {% for choice in web_backend_choices %}
+      <option value="{{ choice }}"{% if choice == backend %} selected{% endif %}>{{ choice }}{% if choice in ai_backends %} (AI){% endif %}</option>
+      {% endfor %}
+    </select>
+    {% if not openai_key_present %}<p class="muted">Note: <code>openai</code> needs OPENAI_API_KEY, which is not currently set.</p>{% endif %}
+    <p class="muted">CV&rarr;profile requires an AI backend: {{ ai_backends|join(', ') }}.</p>
+    <button type="submit">Apply backend</button>
+  </form>
+</section>

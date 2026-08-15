@@ -22,7 +22,14 @@ from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 from rich.text import Text
 
-from .main import parse_search_keywords, run_batch, run_import
+from .io_utils import ProfileFileReader
+from .main import (
+    _optional_env,
+    parse_search_keywords,
+    resolve_ai_backend,
+    run_batch,
+    run_import,
+)
 from .models import (
     ActionItem,
     ActionReminderItem,
@@ -32,6 +39,12 @@ from .models import (
     InboxItem,
     InboxPreferences,
     VacancyListItem,
+)
+from .profile_builder import (
+    AI_PROFILE_BACKENDS,
+    ProfileGenerationError,
+    build_profile_from_cv,
+    write_profile_json,
 )
 from .storage import DatabaseManager
 from .tracking import ActionService, ApplicationTracker, utc_iso_to_local_datetime
@@ -522,7 +535,7 @@ class JobSeekerTui:
             self._render_home()
             choice = Prompt.ask(
                 "Action",
-                choices=("1", "2", "3", "4", "5", "6", "7", "8", "9", "q"),
+                choices=("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "q"),
                 default="5",
                 console=self.console,
             )
@@ -544,6 +557,8 @@ class JobSeekerTui:
                 self._show_inbox()
             elif choice == "9":
                 self._show_today_and_actions()
+            elif choice == "10":
+                self._build_profile_from_cv()
             else:
                 return 0
 
@@ -601,8 +616,138 @@ class JobSeekerTui:
         table.add_row("7", "Show last run log")
         table.add_row("8", "Explained inbox and preferences")
         table.add_row("9", "Today, actions, reminders")
+        table.add_row("10", "Build profile from CV (AI)")
         table.add_row("q", "Quit")
         return table
+
+    def _default_cv_profile_path(self) -> str:
+        active = Path(self.state.profile) if self.state.profile else Path("profile.json")
+        return str(active.with_name("profile_from_cv.json"))
+
+    def _profile_summary_table(self, profile: dict) -> Panel:
+        grid = Table.grid(padding=(0, 2))
+        grid.add_column(style="bold cyan")
+        grid.add_column()
+        grid.add_row("Name", str(profile.get("name", "-")))
+        grid.add_row("Experience", str(profile.get("experience_level", "-")))
+        years = profile.get("years_of_experience")
+        grid.add_row("Years", "-" if years is None else str(years))
+        grid.add_row("Salary", str(profile.get("salary_expectation") or "-"))
+        for label, key in (
+            ("Target roles", "target_roles"),
+            ("Skills", "skills"),
+            ("Must-have", "must_have_skills"),
+            ("Locations", "preferred_locations"),
+            ("Excluded", "excluded_keywords"),
+        ):
+            values = profile.get(key) or []
+            preview = ", ".join(values[:8])
+            if len(values) > 8:
+                preview += f" (+{len(values) - 8})"
+            grid.add_row(label, preview or "-")
+        return Panel(grid, title="Generated profile", border_style="green")
+
+    def _build_profile_from_cv(self) -> None:
+        self.console.clear()
+        self.console.rule("[bold cyan]Build profile from CV")
+
+        backend = resolve_ai_backend()
+        if backend not in AI_PROFILE_BACKENDS:
+            self.console.print(
+                Panel(
+                    "Building a profile from a CV needs an AI backend "
+                    f"({', '.join(AI_PROFILE_BACKENDS)}).\n"
+                    "Set AI_BACKEND=claude_cli or codex_cli to use your subscription CLI, "
+                    "or AI_BACKEND=openai with OPENAI_API_KEY, then try again.\n"
+                    f"Current backend: {backend}",
+                    title="AI backend required",
+                    border_style="red",
+                )
+            )
+            self._pause()
+            return
+
+        self.console.print(f"AI backend: [bold]{backend}[/bold]", style="dim")
+        cv_raw = (
+            Prompt.ask(
+                "Path to your CV (.pdf, .docx, .txt, .md), Enter to cancel",
+                default="",
+                console=self.console,
+            )
+            .strip()
+            .strip('"')
+        )
+        if not cv_raw:
+            return
+
+        self.console.print(
+            "Reading CV and asking the AI to build your profile (this can take a moment)...",
+            style="dim",
+        )
+        try:
+            profile = build_profile_from_cv(
+                cv_raw,
+                backend=backend,
+                openai_model=self.state.openai_model,
+                claude_model=_optional_env("CLAUDE_CLI_MODEL"),
+                codex_model=_optional_env("CODEX_CLI_MODEL"),
+            )
+        except ProfileGenerationError as error:
+            self.console.print(
+                Panel(str(error), title="Could not build profile", border_style="red")
+            )
+            self._pause()
+            return
+        except Exception as error:  # noqa: BLE001 - TUI should keep running
+            self.console.print(
+                Panel(
+                    f"Unexpected error: {error}",
+                    title="Could not build profile",
+                    border_style="red",
+                )
+            )
+            self._pause()
+            return
+
+        self.console.print(self._profile_summary_table(profile))
+
+        save_raw = (
+            Prompt.ask(
+                "Save profile to (Enter for a review file; or type the active profile path to replace it)",
+                default=self._default_cv_profile_path(),
+                console=self.console,
+            )
+            .strip()
+            .strip('"')
+        )
+        if not save_raw:
+            return
+
+        save_path = Path(save_raw)
+        if save_path.exists() and not Confirm.ask(
+            f"Overwrite {save_path}?", default=False, console=self.console
+        ):
+            self.console.print("[yellow]Not saved.[/yellow]")
+            self._pause()
+            return
+
+        try:
+            written = write_profile_json(save_path, profile)
+            ProfileFileReader().read(written)
+        except Exception as error:  # noqa: BLE001 - TUI should keep running
+            self.console.print(
+                Panel(f"Failed to save profile: {error}", title="Save error", border_style="red")
+            )
+            self._pause()
+            return
+
+        self.console.print(f"[green]Saved profile to {written}[/green]")
+        if str(Path(written)) != str(Path(self.state.profile)) and Confirm.ask(
+            "Make this your active profile for this session?", default=True, console=self.console
+        ):
+            self.state.profile = str(written)
+            self.console.print("[green]Active profile updated.[/green]")
+        self._pause()
 
     def _choose_sources(self) -> None:
         all_sources = available_source_names(self.cfg)
