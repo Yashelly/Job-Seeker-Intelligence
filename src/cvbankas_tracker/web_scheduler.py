@@ -35,10 +35,19 @@ class SchedulerBusyError(Exception):
 
 def normalize_time(value: str) -> str:
     """Return a validated ``HH:MM`` string or raise ``ScheduleError``."""
-    text = (value or "").strip()
+    text = str(value or "").strip()
     if not _TIME_RE.match(text):
         raise ScheduleError("Time must be in HH:MM 24-hour format, e.g. 19:00.")
     return text
+
+
+def _positive_int(value: object, *, default: int) -> int:
+    """Coerce an arbitrary persisted value into a positive int, else ``default``."""
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 @dataclass
@@ -72,18 +81,23 @@ def load_schedule(path: Path) -> ScheduleConfig:
     if not isinstance(raw, dict):
         return ScheduleConfig()
     defaults = ScheduleConfig()
-    known = {f for f in asdict(defaults)}
+    known = set(asdict(defaults))
     merged = {**asdict(defaults), **{k: v for k, v in raw.items() if k in known}}
     cfg = ScheduleConfig(**merged)
-    # Defensive coercion for values that arrived from disk.
-    cfg.sources = [str(s) for s in (cfg.sources or [])]
-    cfg.keywords = [str(k) for k in (cfg.keywords or [])]
+    # Defensive coercion for values that arrived from disk. The whole point is
+    # that scheduler.json may be hand-edited or partially corrupted, so every
+    # field is coerced with a fallback and nothing raises out of load_schedule.
+    cfg.sources = [str(s) for s in cfg.sources] if isinstance(cfg.sources, list) else list(DEFAULT_SOURCES)
+    cfg.keywords = [str(k) for k in cfg.keywords] if isinstance(cfg.keywords, list) else []
+    cfg.enabled = bool(cfg.enabled)
     try:
         cfg.time = normalize_time(cfg.time)
     except ScheduleError:
         cfg.time = "19:00"
-    cfg.limit = int(cfg.limit) if int(cfg.limit or 0) > 0 else 10
-    cfg.max_pages = int(cfg.max_pages) if int(cfg.max_pages or 0) > 0 else 1
+    cfg.limit = _positive_int(cfg.limit, default=10)
+    cfg.max_pages = _positive_int(cfg.max_pages, default=1)
+    cfg.analysis_strategy = str(cfg.analysis_strategy or "ai")
+    cfg.last_run_date = str(cfg.last_run_date or "")
     return cfg
 
 
