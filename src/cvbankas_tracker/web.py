@@ -368,7 +368,7 @@ def _start_daily_job(app: FastAPI, schedule: ScheduleConfig) -> int:
     )
     run_cfg = _build_run_cfg(app.state.cfg, sources, keywords)
     try:
-        job = app.state.jobs.start("daily", lambda: run_batch(args, run_cfg))
+        job = app.state.jobs.start("daily", lambda control: run_batch(args, run_cfg, control=control))
     except JobConflictError as error:
         raise SchedulerBusyError(str(error)) from error
     return job.id
@@ -390,7 +390,17 @@ def create_app(
     app = FastAPI(title="Job Seeker Local Dashboard")
     app.state.db_path = resolved_db_path
     app.state.cfg = cfg or {}
+    # A profile the user previously marked active is persisted in the DB; restore
+    # it on startup so the choice survives a restart/redeploy. Fall back to the
+    # launch profile if the stored file is missing or nothing was saved.
     app.state.profile_path = profile_path
+    if bootstrap:
+        try:
+            stored = DatabaseManager(resolved_db_path).get_active_profile_path()
+            if stored and Path(stored).exists():
+                app.state.profile_path = stored
+        except Exception:
+            pass
     app.state.jobs = JobManager()
     app.state.scheduler = DailyScheduler(
         resolved_db_path.parent / "scheduler.json",
@@ -664,7 +674,7 @@ def create_app(
         )
         run_cfg = _build_run_cfg(request.app.state.cfg, selected, keywords)
         try:
-            job = request.app.state.jobs.start("search", lambda: run_batch(args, run_cfg))
+            job = request.app.state.jobs.start("search", lambda control: run_batch(args, run_cfg, control=control))
         except JobConflictError as error:
             raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
         return _redirect(f"/jobs/{job.id}")
@@ -694,7 +704,7 @@ def create_app(
         )
         run_cfg = _build_run_cfg(request.app.state.cfg, list(WEB_SOURCE_CHOICES), [])
         try:
-            job = request.app.state.jobs.start("import", lambda: run_import(args, run_cfg))
+            job = request.app.state.jobs.start("import", lambda control: run_import(args, run_cfg))
         except JobConflictError as error:
             raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
         return _redirect(f"/jobs/{job.id}")
@@ -718,6 +728,26 @@ def create_app(
         if snapshot is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found.")
         return JSONResponse(snapshot)
+
+    def _job_control(request: Request, job_id: int, action: str) -> JSONResponse:
+        jobs = request.app.state.jobs
+        applied = {"pause": jobs.pause, "resume": jobs.resume, "cancel": jobs.cancel}[action](job_id)
+        snapshot = jobs.snapshot(job_id)
+        if snapshot is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found.")
+        return JSONResponse({"applied": applied, **snapshot})
+
+    @app.post("/jobs/{job_id}/pause")
+    def job_pause(request: Request, job_id: int, _f: dict[str, str] = Depends(require_safe_post)):
+        return _job_control(request, job_id, "pause")
+
+    @app.post("/jobs/{job_id}/resume")
+    def job_resume(request: Request, job_id: int, _f: dict[str, str] = Depends(require_safe_post)):
+        return _job_control(request, job_id, "resume")
+
+    @app.post("/jobs/{job_id}/cancel")
+    def job_cancel(request: Request, job_id: int, _f: dict[str, str] = Depends(require_safe_post)):
+        return _job_control(request, job_id, "cancel")
 
     @app.get("/schedule")
     def schedule_page(request: Request):
@@ -874,6 +904,8 @@ def create_app(
 
         if _coerce_bool(form.get("make_active")):
             request.app.state.profile_path = str(written)
+            # Persist the choice so it survives a dashboard restart/redeploy.
+            _db(request).save_active_profile_path(str(written))
         return _redirect("/profile")
 
     def _profile_page_context(request: Request) -> dict[str, Any]:

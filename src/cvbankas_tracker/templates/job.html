@@ -3,36 +3,75 @@
 <section class="card">
   <h2>{{ job.kind|title }} job #{{ job.id }}</h2>
   <p>Status: <strong id="job-status">{{ job.status }}</strong> <span id="job-exit" class="muted"></span></p>
+  <div id="job-controls" class="job-controls" hidden>
+    <button type="button" id="job-toggle">Pause</button>
+    <button type="button" id="job-end" class="danger">End search</button>
+    <span id="job-note" class="muted"></span>
+  </div>
   <pre id="job-log" class="log">{{ job.log }}</pre>
   <p id="job-done" class="muted" hidden>
-    Finished. <a href="/vacancies">View vacancies</a> · <a href="/today">Today</a>
+    Finished. <a href="/today">Recent</a> · <a href="/applications">Saved</a>
   </p>
 </section>
 <script>
 (function () {
   var jobId = {{ job.id }};
+  var csrf = "{{ csrf_token }}";
   var statusEl = document.getElementById("job-status");
   var exitEl = document.getElementById("job-exit");
   var logEl = document.getElementById("job-log");
   var doneEl = document.getElementById("job-done");
+  var controlsEl = document.getElementById("job-controls");
+  var toggleEl = document.getElementById("job-toggle");
+  var endEl = document.getElementById("job-end");
+  var noteEl = document.getElementById("job-note");
+  var active = true;
+
+  function applyStatus(status, exitCode) {
+    statusEl.textContent = status;
+    var running = status === "running" || status === "paused";
+    controlsEl.hidden = !running;
+    if (running) {
+      toggleEl.textContent = status === "paused" ? "Resume" : "Pause";
+      noteEl.textContent = status === "paused" ? "Paused — will stop after the current item." : "";
+    } else {
+      active = false;
+      doneEl.hidden = false;
+      if (exitCode !== null && exitCode !== undefined) {
+        exitEl.textContent = "(exit code " + exitCode + ")";
+      }
+    }
+  }
+
+  function control(action) {
+    var body = new URLSearchParams(); body.set("csrf_token", csrf);
+    fetch("/jobs/" + jobId + "/" + action, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    }).then(function (r) { return r.json(); })
+      .then(function (d) { applyStatus(d.status, d.exit_code); })
+      .catch(function () {});
+  }
+
+  toggleEl.addEventListener("click", function () {
+    control(statusEl.textContent === "paused" ? "resume" : "pause");
+  });
+  endEl.addEventListener("click", function () {
+    noteEl.textContent = "Ending — stops after the current item…";
+    control("cancel");
+  });
 
   function poll() {
     fetch("/jobs/" + jobId + "/log", { headers: { "Accept": "application/json" } })
       .then(function (response) { return response.json(); })
       .then(function (data) {
-        statusEl.textContent = data.status;
         logEl.textContent = data.log || "";
         logEl.scrollTop = logEl.scrollHeight;
-        if (data.status === "running") {
-          setTimeout(poll, 1500);
-        } else {
-          if (data.exit_code !== null && data.exit_code !== undefined) {
-            exitEl.textContent = "(exit code " + data.exit_code + ")";
-          }
-          doneEl.hidden = false;
-        }
+        applyStatus(data.status, data.exit_code);
+        if (active) { setTimeout(poll, 1500); }
       })
-      .catch(function () { setTimeout(poll, 3000); });
+      .catch(function () { if (active) { setTimeout(poll, 3000); } });
   }
   poll();
 })();

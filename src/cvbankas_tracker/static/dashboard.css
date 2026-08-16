@@ -436,6 +436,12 @@ main li { margin: 0.35rem 0; }
   margin: 0.3rem 0 0;
 }
 .inline-form { display: inline; margin: 0; }
+.job-controls { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 1rem; }
+.job-controls .danger {
+  background: var(--danger, #dc2626);
+  border-color: transparent;
+  color: #fff;
+}
 
 /* ---- Responsive --------------------------------------------------- */
 @media (max-width: 640px) {

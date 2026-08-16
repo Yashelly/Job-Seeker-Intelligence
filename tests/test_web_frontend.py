@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import time
@@ -50,7 +51,7 @@ class JobManagerTests(unittest.TestCase):
     def test_runs_job_and_captures_log(self) -> None:
         manager = JobManager()
 
-        def target() -> int:
+        def target(control) -> int:
             print("hello from job")
             return 0
 
@@ -67,7 +68,7 @@ class JobManagerTests(unittest.TestCase):
     def test_error_is_captured(self) -> None:
         manager = JobManager()
 
-        def boom() -> int:
+        def boom(control) -> int:
             raise RuntimeError("kaboom")
 
         job = manager.start("search", boom)
@@ -83,7 +84,7 @@ class JobManagerTests(unittest.TestCase):
         manager = JobManager()
         started = _Barrier()
 
-        def slow() -> int:
+        def slow(control) -> int:
             started.set()
             time.sleep(0.3)
             return 0
@@ -91,7 +92,7 @@ class JobManagerTests(unittest.TestCase):
         job = manager.start("search", slow)
         started.wait()
         with self.assertRaises(JobConflictError):
-            manager.start("search", lambda: 0)
+            manager.start("search", lambda control: 0)
         # let the first finish
         for _ in range(100):
             if manager.get(job.id).status != "running":
@@ -111,7 +112,7 @@ class JobManagerTests(unittest.TestCase):
 
         manager = JobManager()
 
-        def noisy() -> int:
+        def noisy(control) -> int:
             print("A" * (MAX_LOG_CHARS * 2))
             return 0
 
@@ -122,17 +123,69 @@ class JobManagerTests(unittest.TestCase):
 
     def test_finished_at_is_recorded(self) -> None:
         manager = JobManager()
-        job_id = self._run_to_completion(manager, "search", lambda: 0)
+        job_id = self._run_to_completion(manager, "search", lambda control: 0)
         snap = manager.snapshot(job_id)
         self.assertEqual(snap["status"], "done")
         self.assertTrue(snap["finished_at"])
+
+    def test_pause_resume_cancel_flow(self) -> None:
+        import threading
+
+        manager = JobManager()
+        started = _Barrier()
+
+        def target(control) -> int:
+            started.set()
+            for _ in range(200):
+                control.wait_if_paused()
+                if control.is_cancelled():
+                    return 0
+                time.sleep(0.01)
+            return 0
+
+        job = manager.start("search", target)
+        started.wait()
+        self.assertTrue(manager.pause(job.id))
+        self.assertEqual(manager.get(job.id).status, "paused")
+        self.assertTrue(manager.resume(job.id))
+        self.assertEqual(manager.get(job.id).status, "running")
+        self.assertTrue(manager.cancel(job.id))
+        for _ in range(200):
+            if manager.get(job.id).status != "running":
+                break
+            time.sleep(0.02)
+        self.assertEqual(manager.snapshot(job.id)["status"], "cancelled")
+        _ = threading  # imported for clarity that the flow is concurrent
+
+    def test_job_control_blocks_while_paused(self) -> None:
+        import threading
+
+        from cvbankas_tracker.web_jobs import JobControl
+
+        control = JobControl()
+        control.pause()
+        self.assertTrue(control.is_paused)
+        unblocked = threading.Event()
+
+        def worker() -> None:
+            control.wait_if_paused()
+            unblocked.set()
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.assertFalse(unblocked.wait(0.2))  # still parked while paused
+        control.resume()
+        self.assertTrue(unblocked.wait(1.0))  # released on resume
+        control.pause()
+        control.cancel()  # cancel also unblocks and clears paused
+        self.assertTrue(control.is_cancelled())
+        self.assertFalse(control.is_paused)
 
     def test_completed_jobs_are_pruned(self) -> None:
         from cvbankas_tracker.web_jobs import MAX_COMPLETED_JOBS
 
         manager = JobManager()
         for _ in range(MAX_COMPLETED_JOBS + 5):
-            self._run_to_completion(manager, "search", lambda: 0)
+            self._run_to_completion(manager, "search", lambda control: 0)
         # Pruning happens at the start of each run, so the most recent finished
         # job survives until the next start(): the bound is MAX + 1.
         with manager._lock:
@@ -156,7 +209,7 @@ class SearchImportTests(unittest.TestCase):
     def test_start_search_runs_job_with_expected_args(self) -> None:
         captured: dict = {}
 
-        def fake_run_batch(args, cfg=None) -> int:
+        def fake_run_batch(args, cfg=None, control=None) -> int:
             captured["sources"] = args.sources
             captured["keywords"] = args.keywords
             captured["limit"] = args.limit
@@ -193,7 +246,7 @@ class SearchImportTests(unittest.TestCase):
     def test_profile_search_derives_keywords_from_profile(self) -> None:
         captured: dict = {}
 
-        def fake_run_batch(args, cfg=None) -> int:
+        def fake_run_batch(args, cfg=None, control=None) -> int:
             captured["keywords"] = args.keywords
             captured["cfg"] = cfg
             print("batch done")
@@ -220,7 +273,7 @@ class SearchImportTests(unittest.TestCase):
     def test_search_passes_prune_autosave_and_infinite_to_runner(self) -> None:
         captured: dict = {}
 
-        def fake_run_batch(args, cfg=None) -> int:
+        def fake_run_batch(args, cfg=None, control=None) -> int:
             captured["prune_threshold"] = args.prune_threshold
             captured["auto_save"] = args.auto_save
             captured["auto_save_threshold"] = args.auto_save_threshold
@@ -330,6 +383,22 @@ class SearchImportTests(unittest.TestCase):
             self.assertEqual(resp.status_code, 303)
             record = DatabaseManager(db_path).get_application_record(url)
             self.assertIsNotNone(record)
+
+    def test_active_profile_persists_across_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "web.db"
+            profile_file = Path(tmp) / "mine.json"
+            profile_file.write_text(json.dumps(GENERATED), encoding="utf-8")
+
+            db = DatabaseManager(db_path)
+            db.initialize()
+            db.save_active_profile_path(str(profile_file))
+            db.close()
+
+            # A fresh app (as after a restart/redeploy) restores the saved choice
+            # instead of falling back to the launch profile.
+            app = create_app(db_path, profile_path="sample_data/active_profile.json")
+            self.assertEqual(app.state.profile_path, str(profile_file))
 
     def test_start_search_rejected_without_origin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

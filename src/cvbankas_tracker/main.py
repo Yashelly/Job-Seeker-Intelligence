@@ -55,6 +55,7 @@ from .telegram import (
     discover_telegram_chats,
 )
 from .tracking import ActionService, ApplicationTracker, utc_iso_to_local_datetime
+from .web_jobs import JobControl
 
 DEFAULT_CONFIG_CANDIDATES = (
     "config/cvbankas.local.yaml",
@@ -1365,7 +1366,9 @@ def _run_source_batch(
     workspace: Path,
     profile: UserProfile,
     collection_run_id: int | None = None,
+    control: JobControl | None = None,
 ) -> SourceBatchResult:
+    control = control or JobControl()
     result = SourceBatchResult(source_name=source.name, report_rows=[])
     database = DatabaseManager(workspace / args.db)
 
@@ -1384,6 +1387,9 @@ def _run_source_batch(
 
         try:
             for keyword in keywords:
+                control.wait_if_paused()
+                if control.is_cancelled():
+                    break
                 print(
                     safe_console_text(
                         f"[{ts()}] {source.name} collecting listings "
@@ -1425,6 +1431,10 @@ def _run_source_batch(
         )
 
         for index, url in enumerate(listing_urls[: args.limit], start=1):
+            control.wait_if_paused()
+            if control.is_cancelled():
+                print(safe_console_text(f"[{ts()}] {source.name} search ended by user."))
+                break
             result.attempted_count += 1
             try:
                 _process_vacancy_url(
@@ -1542,9 +1552,12 @@ INFINITE_MAX_PAGES = 100
 INFINITE_LIMIT = 100_000
 
 
-def run_batch(args: argparse.Namespace, cfg: dict | None = None) -> int:
+def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: JobControl | None = None) -> int:
     load_dotenv_if_present()
     cfg = cfg or {}
+    # A no-op control (never paused/cancelled) for CLI/import callers; the web
+    # dashboard passes a live one so a run can be paused or ended from the UI.
+    control = control or JobControl()
 
     workspace = Path.cwd()
     data_dir = workspace / "sample_data"
@@ -1599,6 +1612,7 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None) -> int:
             workspace=workspace,
             profile=profile,
             collection_run_id=collection_run.id,
+            control=control,
         ),
     )
     report_rows = [

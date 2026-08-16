@@ -1826,6 +1826,33 @@ class DatabaseManager:
                     (json.dumps(utc_now_iso()),),
                 )
 
+    def get_active_profile_path(self) -> str | None:
+        """Return the persisted active profile path, or None if never set."""
+        with self.connection() as connection:
+            row = connection.execute(
+                "SELECT value_json FROM settings WHERE key = 'active_profile_path'"
+            ).fetchone()
+        if row is None:
+            return None
+        value = json.loads(row["value_json"])
+        return str(value) if value else None
+
+    def save_active_profile_path(self, path: str) -> None:
+        """Persist which profile file the dashboard should treat as active.
+
+        Kept in the DB so the choice survives a dashboard restart/redeploy,
+        instead of living only in the in-memory app state.
+        """
+        with self.transaction() as connection:
+            connection.execute(
+                """
+                INSERT INTO settings (key, value_json)
+                VALUES ('active_profile_path', ?)
+                ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+                """,
+                (json.dumps(str(path)),),
+            )
+
     def get_user_timezone_confirmation(self) -> str | None:
         with self.connection() as connection:
             row = connection.execute(
