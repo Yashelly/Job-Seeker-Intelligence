@@ -17,8 +17,6 @@
   {% endif %}
 </section>
 
-{% include "_backend_form.html" %}
-
 <section class="card">
   <h2>Build profile from CV</h2>
   {% if backend not in ai_backends %}
@@ -26,11 +24,15 @@
   {% else %}
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <p class="muted">Upload your CV ({{ supported_suffixes|join(', ') }}). The {{ backend }} backend will extract roles, skills, and keywords.</p>
-  <form method="post" action="/profile/build" enctype="multipart/form-data">
+  <form id="build-form" method="post" action="/profile/build" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="cv_file">CV file</label>
     <input id="cv_file" name="cv_file" type="file" required accept=".pdf,.docx,.txt,.md">
-    <button type="submit">Generate profile</button>
+    <button id="build-submit" type="submit">Generate profile</button>
+    <p id="build-progress" class="progress" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      Reading your CV and asking the {{ backend }} backend… this can take 10–30 seconds.
+    </p>
   </form>
   {% endif %}
 </section>
@@ -84,4 +86,16 @@
     <button type="submit">Import URLs</button>
   </form>
 </section>
+<script>
+(function () {
+  var form = document.getElementById("build-form");
+  if (!form) return;
+  form.addEventListener("submit", function () {
+    var button = document.getElementById("build-submit");
+    var progress = document.getElementById("build-progress");
+    if (button) { button.disabled = true; button.textContent = "Processing…"; }
+    if (progress) { progress.hidden = false; }
+  });
+})();
+</script>
 {% endblock %}

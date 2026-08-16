@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from .ai_cli import parse_json_response, run_claude_cli, run_codex_cli
+from .ai_cli import AICLIError, parse_json_response, run_claude_cli, run_codex_cli
 
 CV_TEXT_LIMIT = 24000
 # Upper bound for a CV upload accepted over the web dashboard. Real resumes are
@@ -124,14 +124,17 @@ def _clean_list(values: object) -> list[str]:
     return cleaned
 
 
-def _clean_years(value: object) -> int | None:
+def _clean_years(value: object) -> int | float | None:
     if value is None or isinstance(value, bool):
         return None
     try:
-        years = int(value)
+        years = float(value)
     except (TypeError, ValueError):
         return None
-    return max(0, years)
+    years = max(0.0, years)
+    # Keep whole years as int (so the UI shows "6" not "6.0"); preserve
+    # sub-year experience as a rounded fraction (e.g. 0.8) for near-match scoring.
+    return int(years) if years.is_integer() else round(years, 1)
 
 
 def normalize_profile_data(data: dict[str, object]) -> dict[str, object]:
@@ -186,14 +189,35 @@ def generate_profile_dict(
             "Set AI_BACKEND or OPENAI_API_KEY and try again."
         )
 
+    # Convert backend-specific failures (missing key, CLI not on PATH, timeout,
+    # unparseable output) into ProfileGenerationError so callers — including the
+    # web dashboard — can show a clear message instead of a 500.
     if backend == "openai":
-        raw = _run_openai_profile(cv_text, openai_model)
+        if not os.getenv("OPENAI_API_KEY"):
+            raise ProfileGenerationError(
+                "The OpenAI backend needs an API key. Set OPENAI_API_KEY, or "
+                "switch the backend to claude_cli or codex_cli in Settings."
+            )
+        try:
+            raw = _run_openai_profile(cv_text, openai_model)
+        except Exception as exc:  # openai SDK / network / auth errors
+            raise ProfileGenerationError(f"OpenAI request failed: {exc}") from exc
     elif backend == "claude_cli":
-        raw = run_claude_cli(build_profile_prompt(cv_text), model=claude_model)
+        try:
+            raw = run_claude_cli(build_profile_prompt(cv_text), model=claude_model)
+        except AICLIError as exc:
+            raise ProfileGenerationError(str(exc)) from exc
     else:
-        raw = run_codex_cli(build_profile_prompt(cv_text), model=codex_model)
+        try:
+            raw = run_codex_cli(build_profile_prompt(cv_text), model=codex_model)
+        except AICLIError as exc:
+            raise ProfileGenerationError(str(exc)) from exc
 
-    return normalize_profile_data(parse_json_response(raw))
+    try:
+        parsed = parse_json_response(raw)
+    except AICLIError as exc:
+        raise ProfileGenerationError(str(exc)) from exc
+    return normalize_profile_data(parsed)
 
 
 def write_profile_json(path: str | Path, profile: dict[str, object]) -> Path:

@@ -151,6 +151,23 @@ class GenerateProfileDictTests(unittest.TestCase):
         self.assertIn("FastAPI", prompt)
         self.assertIn("target_roles", prompt)
 
+    def test_openai_backend_without_key_raises_clear_error(self) -> None:
+        with patch.dict("os.environ", {"OPENAI_API_KEY": ""}, clear=False):
+            with self.assertRaises(ProfileGenerationError) as ctx:
+                generate_profile_dict(SAMPLE_CV, backend="openai")
+        self.assertIn("OPENAI_API_KEY", str(ctx.exception))
+
+    def test_cli_backend_failure_becomes_profile_error(self) -> None:
+        from cvbankas_tracker.ai_cli import AICLIError
+
+        with patch(
+            "cvbankas_tracker.profile_builder.run_claude_cli",
+            side_effect=AICLIError("Claude CLI 'claude' was not found on PATH."),
+        ):
+            with self.assertRaises(ProfileGenerationError) as ctx:
+                generate_profile_dict(SAMPLE_CV, backend="claude_cli")
+        self.assertIn("not found on PATH", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

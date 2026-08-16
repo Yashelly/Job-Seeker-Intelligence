@@ -1260,8 +1260,18 @@ class DatabaseManager:
         original_source_url: str | None = None,
         application_origin: ApplicationStatusOrigin = ApplicationStatusOrigin.SYSTEM,
         application_note: str = "",
-    ) -> tuple[int, ApplicationRecord]:
+        auto_save: bool = True,
+        auto_save_threshold: int = 0,
+    ) -> tuple[int, ApplicationRecord | None]:
         """Persist one processed vacancy as one all-or-nothing write unit.
+
+        A "Saved" application projection is created for a freshly collected
+        vacancy only when ``auto_save`` is set and the analysis score reaches
+        ``auto_save_threshold``. The defaults (auto_save=True, threshold=0)
+        preserve the historical "save everything" behavior for callers that do
+        not opt into thresholded saving. When neither condition holds, the
+        vacancy and its analysis are still stored but no application row is
+        created, and the returned application is ``None``.
 
         A batch item is only reportable after its vacancy, analysis,
         application projection, and initial application event have all been
@@ -1353,7 +1363,22 @@ class DatabaseManager:
                 "SELECT * FROM applications WHERE vacancy_source_url = ?",
                 (canonical_url,),
             ).fetchone()
-            if existing_application is None:
+            if existing_application is not None:
+                connection.execute(
+                    """
+                    UPDATE applications
+                    SET analysis_id = ?, notes = CASE WHEN notes = '' THEN ? ELSE notes END
+                    WHERE vacancy_source_url = ?
+                    """,
+                    (analysis_id, application_note, canonical_url),
+                )
+                application = ApplicationRecord(
+                    vacancy_source_url=canonical_url,
+                    analysis_id=analysis_id,
+                    status=ApplicationStatus(existing_application["status"]),
+                    notes=existing_application["notes"] or application_note,
+                )
+            elif auto_save and analysis.score >= auto_save_threshold:
                 connection.execute(
                     """
                     INSERT INTO applications (vacancy_source_url, analysis_id, status, notes)
@@ -1388,21 +1413,56 @@ class DatabaseManager:
                     notes=application_note,
                 )
             else:
-                connection.execute(
-                    """
-                    UPDATE applications
-                    SET analysis_id = ?, notes = CASE WHEN notes = '' THEN ? ELSE notes END
-                    WHERE vacancy_source_url = ?
-                    """,
-                    (analysis_id, application_note, canonical_url),
-                )
-                application = ApplicationRecord(
-                    vacancy_source_url=canonical_url,
-                    analysis_id=analysis_id,
-                    status=ApplicationStatus(existing_application["status"]),
-                    notes=existing_application["notes"] or application_note,
-                )
+                # Collected but below the auto-save threshold: keep the vacancy
+                # and its analysis, but do not create an application projection.
+                application = None
         return analysis_id, application
+
+    def prune_low_score_unsaved(self, threshold: int) -> int:
+        """Delete vacancies whose latest analysis score is below ``threshold``
+        and that have never been saved or status-tracked (no application row).
+
+        Their analyses, aliases, run observations and actions are removed with
+        them. Vacancies the user saved or moved through a status are always
+        kept, even with a low score, so this only clears low-match noise.
+        Returns the number of vacancies deleted.
+        """
+        with self.transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT v.source_url AS url
+                FROM vacancies v
+                LEFT JOIN applications app ON app.vacancy_source_url = v.source_url
+                LEFT JOIN analyses a ON a.id = (
+                    SELECT a2.id FROM analyses a2
+                    WHERE a2.vacancy_source_url = v.source_url
+                    ORDER BY a2.id DESC LIMIT 1
+                )
+                WHERE app.vacancy_source_url IS NULL
+                  AND a.score IS NOT NULL
+                  AND a.score < ?
+                """,
+                (threshold,),
+            ).fetchall()
+            urls = [row["url"] for row in rows]
+            if not urls:
+                return 0
+            # Chunk the IN(...) lists to stay under SQLite's bound-variable limit.
+            for start in range(0, len(urls), 400):
+                chunk = urls[start : start + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                for table, column in (
+                    ("analyses", "vacancy_source_url"),
+                    ("vacancy_url_aliases", "canonical_source_url"),
+                    ("collection_run_observations", "vacancy_source_url"),
+                    ("action_items", "vacancy_source_url"),
+                    ("vacancies", "source_url"),
+                ):
+                    connection.execute(
+                        f"DELETE FROM {table} WHERE {column} IN ({placeholders})",
+                        chunk,
+                    )
+        return len(urls)
 
     def list_analyses(self) -> list[tuple[int, VacancyAnalysis]]:
         with self.connection() as connection:

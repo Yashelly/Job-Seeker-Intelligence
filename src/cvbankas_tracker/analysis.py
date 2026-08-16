@@ -295,6 +295,11 @@ def _role_match_score(
     return best_score, best_note
 
 
+def _format_years(value: int | float) -> str:
+    """Render years without a trailing '.0' on whole numbers (6 not 6.0)."""
+    return str(int(value)) if float(value).is_integer() else str(value)
+
+
 def _experience_match_score(vacancy: Vacancy, profile: UserProfile) -> tuple[int, str]:
     if profile.years_of_experience is None:
         return 0, ""
@@ -311,9 +316,18 @@ def _experience_match_score(vacancy: Vacancy, profile: UserProfile) -> tuple[int
     inferred_seniority = _infer_vacancy_seniority(searchable)
     if required_years:
         required = max(required_years)
-        if profile.years_of_experience >= required:
+        have = profile.years_of_experience
+        if required <= 0 or have >= required:
             return 10, f"Experience level matches the vacancy expectation ({required}+ years)."
-        return -10, f"Vacancy appears to expect about {required}+ years of experience."
+        # Graded near-match: the closer the candidate is to the required years,
+        # the higher the score. Scales linearly from +10 (meets it) down to -10
+        # (no relevant experience), so e.g. 0.8 of a required year still scores
+        # well and 0.6, 0.4, 0.2 taper off proportionally.
+        graded = round(-10 + 20 * (have / required))
+        have_text = _format_years(have)
+        if graded >= 0:
+            return graded, f"Close to the vacancy's {required}+ year expectation ({have_text} yrs)."
+        return graded, f"Below the vacancy's {required}+ year expectation ({have_text} yrs)."
 
     if not inferred_seniority:
         return 0, ""

@@ -350,5 +350,97 @@ class StorageAndIOTests(unittest.TestCase):
             self.assertTrue(database.has_vacancy(vacancy.source_url))
 
 
+def _vac(url: str, source_id: str) -> Vacancy:
+    return Vacancy(
+        source_name="sample",
+        source_id=source_id,
+        source_url=url,
+        title="Role",
+        company="Co",
+        location="Remote",
+        salary_text="",
+        requirements=[],
+        responsibilities=[],
+    )
+
+
+def _analysis(url: str, score: int) -> VacancyAnalysis:
+    return VacancyAnalysis(
+        vacancy_source_url=url,
+        analysis_method=AnalysisMethod.RULE_BASED,
+        score=score,
+        fit_label=FitLabel.LOW if score < 40 else FitLabel.MEDIUM,
+        explanation="x",
+        matched_points=(),
+        missing_points=(),
+        notes="",
+    )
+
+
+class AutoSaveAndPruneTests(unittest.TestCase):
+    def test_auto_save_disabled_creates_no_application(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(Path(tmp) / "a.db")
+            db.initialize()
+            url = "https://example.test/low"
+            _id, app = db.save_processed_vacancy(
+                vacancy=_vac(url, "1"),
+                analysis=_analysis(url, 20),
+                auto_save=False,
+            )
+            self.assertIsNone(app)
+            self.assertIsNone(db.get_application_record(url))
+            # The vacancy and its analysis are still stored.
+            self.assertTrue(db.has_vacancy(url))
+            db.close()
+
+    def test_auto_save_threshold_only_saves_high_scores(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(Path(tmp) / "b.db")
+            db.initialize()
+            low = "https://example.test/low"
+            high = "https://example.test/high"
+            _i, low_app = db.save_processed_vacancy(
+                vacancy=_vac(low, "1"), analysis=_analysis(low, 30),
+                auto_save=True, auto_save_threshold=40,
+            )
+            _j, high_app = db.save_processed_vacancy(
+                vacancy=_vac(high, "2"), analysis=_analysis(high, 55),
+                auto_save=True, auto_save_threshold=40,
+            )
+            self.assertIsNone(low_app)
+            self.assertIsNotNone(high_app)
+            self.assertEqual(high_app.status, ApplicationStatus.SAVED)
+            db.close()
+
+    def test_prune_removes_unsaved_below_threshold_but_keeps_saved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(Path(tmp) / "c.db")
+            db.initialize()
+            low_unsaved = "https://example.test/low-unsaved"
+            low_saved = "https://example.test/low-saved"
+            high = "https://example.test/high"
+            db.save_processed_vacancy(
+                vacancy=_vac(low_unsaved, "1"), analysis=_analysis(low_unsaved, 12),
+                auto_save=False,
+            )
+            db.save_processed_vacancy(
+                vacancy=_vac(low_saved, "2"), analysis=_analysis(low_saved, 15),
+                auto_save=True, auto_save_threshold=0,  # force a Saved record
+            )
+            db.save_processed_vacancy(
+                vacancy=_vac(high, "3"), analysis=_analysis(high, 80),
+                auto_save=False,
+            )
+
+            removed = db.prune_low_score_unsaved(40)
+
+            self.assertEqual(removed, 1)
+            self.assertFalse(db.has_vacancy(low_unsaved))   # unsaved + low -> gone
+            self.assertTrue(db.has_vacancy(low_saved))       # saved -> kept despite low score
+            self.assertTrue(db.has_vacancy(high))            # high score -> kept
+            db.close()
+
+
 if __name__ == "__main__":
     unittest.main()

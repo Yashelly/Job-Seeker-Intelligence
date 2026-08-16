@@ -3,6 +3,7 @@
 <section class="card">
   <h2>Run a vacancy search</h2>
   <p class="muted">Collects vacancies from the selected sources, analyzes, and stores them. Runs in the background — you can watch the live log.</p>
+  <p class="info-banner">Every vacancy processed in this run shows up in <a href="/today">Recent</a>. Ones below the prune threshold that you don't <strong>Save</strong> are removed when you start the next search.</p>
   <form method="post" action="/search/start">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
@@ -13,8 +14,23 @@
       {% endfor %}
     </fieldset>
 
-    <label for="keywords">Keywords (one per line, or comma/semicolon separated)</label>
-    <textarea id="keywords" name="keywords" rows="4" placeholder="python developer&#10;automation&#10;fastapi"></textarea>
+    <fieldset>
+      <legend>What to search for</legend>
+      {% if profile_keywords %}
+      <p class="muted">By default this searches using your active profile — it will look for:
+        <strong>{{ profile_keywords | join(", ") }}</strong>.</p>
+      {% else %}
+      <p class="muted">Your active profile has no search terms yet, so enter keywords below.</p>
+      {% endif %}
+      <label class="inline">
+        <input type="checkbox" id="use_keywords" name="use_keywords" value="on"{% if not profile_keywords %} checked{% endif %}>
+        Search by specific keywords instead
+      </label>
+      <div id="keywords_field"{% if profile_keywords %} hidden{% endif %}>
+        <label for="keywords">Keywords (one per line, or comma/semicolon separated)</label>
+        <textarea id="keywords" name="keywords" rows="4" placeholder="python developer&#10;automation&#10;fastapi"></textarea>
+      </div>
+    </fieldset>
 
     <div class="row">
       <div>
@@ -34,8 +50,35 @@
       </div>
     </div>
 
+    <fieldset>
+      <legend>Collection &amp; saving</legend>
+      <div class="row">
+        <div>
+          <label for="prune_threshold">Prune below % match</label>
+          <input id="prune_threshold" name="prune_threshold" type="number" min="0" max="100" value="{{ default_prune_threshold }}">
+          <p class="hint">On the next run, unsaved vacancies below this match % are deleted.</p>
+        </div>
+        <div>
+          <label for="auto_save_threshold">Auto-save above % match</label>
+          <input id="auto_save_threshold" name="auto_save_threshold" type="number" min="0" max="100" value="{{ default_autosave_threshold }}">
+          <label class="inline"><input type="checkbox" name="auto_save" value="on"> Auto-save matches at/above this %</label>
+        </div>
+      </div>
+      <label class="inline"><input type="checkbox" name="infinite" value="on"> Infinite search — keep going until the sources run out of matching vacancies</label>
+    </fieldset>
+
     <label class="inline"><input type="checkbox" name="refresh" value="on"> Reprocess vacancies already in the database</label>
     <button type="submit">Start search</button>
   </form>
 </section>
+<script>
+(function () {
+  var toggle = document.getElementById("use_keywords");
+  var field = document.getElementById("keywords_field");
+  if (!toggle || !field) return;
+  function sync() { field.hidden = !toggle.checked; }
+  toggle.addEventListener("change", sync);
+  sync();
+})();
+</script>
 {% endblock %}
