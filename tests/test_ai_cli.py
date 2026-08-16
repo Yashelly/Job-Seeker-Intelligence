@@ -74,7 +74,12 @@ class RunClaudeCLITests(unittest.TestCase):
     def test_extracts_result_field_from_envelope(self) -> None:
         envelope = {"is_error": False, "result": '{"score": 88}'}
         completed = MagicMock(returncode=0, stdout=json.dumps(envelope), stderr="")
-        with patch.object(ai_cli.subprocess, "run", return_value=completed) as run:
+        with (
+            patch.object(ai_cli.subprocess, "run", return_value=completed) as run,
+            # Force the fallback branch so the bare command name is asserted
+            # deterministically, regardless of what is installed on PATH.
+            patch.object(ai_cli.shutil, "which", return_value=None),
+        ):
             result = run_claude_cli("prompt", model="claude-opus-4-8")
 
         self.assertEqual(result, '{"score": 88}')

@@ -61,3 +61,6 @@ temp/
 *.part
 *.runtime.lock
 _tmp_*/
+
+# Runtime artifact from CV profile builder
+profile_from_cv.json

@@ -2,11 +2,23 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 DEFAULT_CLI_TIMEOUT = 240
+
+
+def _resolve_command(command: str) -> str:
+    """Return an executable path for ``command``.
+
+    On Windows, npm-installed CLIs are ``.cmd`` shims (e.g. ``codex.cmd``) that
+    ``subprocess`` does not find by bare name; ``shutil.which`` resolves the
+    right extension. Falls back to the bare name so a genuinely missing command
+    still raises FileNotFoundError with a clear message.
+    """
+    return shutil.which(command) or command
 
 _SCORE_DIGITS = re.compile(r"-?\d+")
 
@@ -102,7 +114,7 @@ def run_claude_cli(
     Uses ``claude -p ... --output-format json``; the actual answer is the ``result`` field
     of the JSON envelope printed to stdout.
     """
-    args = [command, "-p", prompt, "--output-format", "json"]
+    args = [_resolve_command(command), "-p", prompt, "--output-format", "json"]
     if model:
         args += ["--model", model]
 
@@ -149,7 +161,7 @@ def run_codex_cli(
     """
     with tempfile.TemporaryDirectory() as tmp_dir:
         out_path = Path(tmp_dir) / "codex_last_message.txt"
-        args = [command, "exec", "--skip-git-repo-check", "-o", str(out_path)]
+        args = [_resolve_command(command), "exec", "--skip-git-repo-check", "-o", str(out_path)]
         if model:
             args += ["-m", model]
         args.append(prompt)
