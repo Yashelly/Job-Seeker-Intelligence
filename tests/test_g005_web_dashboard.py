@@ -73,10 +73,10 @@ class G005WebDashboardTests(unittest.TestCase):
 
             with TestClient(create_app(db_path), base_url=BASE) as client:
                 for path, heading in [
-                    ("/today", "Today"),
+                    ("/today", "Recent"),
                     ("/vacancies", "Vacancies"),
                     (f"/vacancy?url={vacancy_url}", "Web Automation Engineer"),
-                    ("/applications", "Applications"),
+                    ("/applications", "Saved"),
                     ("/settings", "Settings"),
                 ]:
                     response = client.get(path)

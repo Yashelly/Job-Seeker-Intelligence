@@ -77,7 +77,10 @@ class UserProfile:
     skills: list[str]
     preferred_locations: list[str]
     experience_level: str
-    years_of_experience: int | None = None
+    # Whole years are stored as int; sub-year experience uses a fraction
+    # (e.g. 0.2, 0.4, 0.8) so near-match scoring can grade it against a
+    # vacancy that asks for "1 year".
+    years_of_experience: int | float | None = None
     salary_expectation: str | None = None
     additional_keywords: list[str] = field(default_factory=list)
     must_have_skills: list[str] = field(default_factory=list)

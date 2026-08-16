@@ -9,6 +9,7 @@ from cvbankas_tracker.analysis import (
     RuleBasedAnalysisStrategy,
     VacancyAnalysisBuilder,
     VacancyAnalysisService,
+    _experience_match_score,
 )
 from cvbankas_tracker.models import AnalysisMethod, FitLabel, UserProfile, Vacancy
 
@@ -94,6 +95,54 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(
             any("Excluded profile keywords matched" in point for point in analysis.missing_points)
         )
+
+
+class ExperienceMatchTests(unittest.TestCase):
+    def _profile(self, years: int | float | None) -> UserProfile:
+        return UserProfile(
+            name="Candidate",
+            target_roles=["Python Developer"],
+            skills=["python"],
+            preferred_locations=["Remote"],
+            experience_level="Junior",
+            years_of_experience=years,
+        )
+
+    def _vacancy(self, text: str) -> Vacancy:
+        return Vacancy(
+            source_id="1-9",
+            source_url="https://example.test/9",
+            title="Python Developer",
+            company="Test",
+            location="Remote",
+            salary_text="",
+            requirements=[text],
+            responsibilities=[],
+        )
+
+    def test_meeting_required_years_scores_full(self) -> None:
+        score, _ = _experience_match_score(self._vacancy("1 year of experience"), self._profile(1))
+        self.assertEqual(score, 10)
+
+    def test_near_match_grades_down_with_fractional_years(self) -> None:
+        vacancy = self._vacancy("1 year of experience")
+        s08, note08 = _experience_match_score(vacancy, self._profile(0.8))
+        s06, _ = _experience_match_score(vacancy, self._profile(0.6))
+        s04, _ = _experience_match_score(vacancy, self._profile(0.4))
+        # Closer to the required year -> higher score, tapering off proportionally.
+        self.assertGreater(s08, s06)
+        self.assertGreater(s06, s04)
+        self.assertEqual(s08, 6)
+        self.assertIn("0.8", note08)
+
+    def test_far_below_requirement_is_strongly_negative(self) -> None:
+        # 0.8 of a required 5 years is a poor fit.
+        score, _ = _experience_match_score(self._vacancy("5 years experience"), self._profile(0.8))
+        self.assertLess(score, 0)
+
+    def test_no_years_in_vacancy_is_neutral_or_seniority_based(self) -> None:
+        score, _ = _experience_match_score(self._vacancy("Great team"), self._profile(0.8))
+        self.assertIsInstance(score, int)
 
 
 if __name__ == "__main__":

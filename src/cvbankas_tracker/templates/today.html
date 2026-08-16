@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card" aria-labelledby="fresh-heading">
-  <h2 id="fresh-heading">New recommended vacancies</h2>
-  {% if latest_run and latest_run.status == 'partial' %}<p class="badge">PARTIAL RUN: latest inbox results came from an incomplete collection.</p>{% endif %}
+  <h2 id="fresh-heading">Vacancies from the latest run</h2>
+  <p class="muted">Everything collected in the most recent search, regardless of match %. Low-match vacancies you don't save are removed when you start the next search. Hit <strong>Save</strong> to keep one in <a href="/applications">Saved</a>.</p>
+  {% if latest_run and latest_run.status == 'partial' %}<p class="badge">PARTIAL RUN: latest results came from an incomplete collection.</p>{% endif %}
   {% if inbox_items %}
   <div class="vac-list">
     {% for item in inbox_items %}
@@ -18,10 +19,21 @@
         </div>
       </div>
       {% if item.explanation %}<p class="vac-why">{{ item.explanation }}</p>{% endif %}
+      <div class="vac-foot">
+        {% if item.application_status %}
+        <span class="badge">Saved · {{ item.application_status.value }}</span>
+        {% else %}
+        <form method="post" action="/vacancy/save" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="vacancy_source_url" value="{{ item.source_url }}">
+          <button type="submit">Save</button>
+        </form>
+        {% endif %}
+      </div>
     </article>
     {% endfor %}
   </div>
-  {% else %}<p class="muted">No new recommendations match the current settings.</p>{% endif %}
+  {% else %}<p class="muted">No vacancies yet — run a search from the <a href="/search">Search</a> page.</p>{% endif %}
 </section>
 <section class="card" aria-labelledby="reminders-heading">
   <h2 id="reminders-heading">Due and overdue actions</h2>

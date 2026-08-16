@@ -11,6 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fastapi.testclient import TestClient
 
+from cvbankas_tracker.models import (
+    AnalysisMethod,
+    FitLabel,
+    Vacancy,
+    VacancyAnalysis,
+)
+from cvbankas_tracker.storage import DatabaseManager
 from cvbankas_tracker.web import create_app
 from cvbankas_tracker.web_jobs import JobConflictError, JobManager
 
@@ -165,6 +172,7 @@ class SearchImportTests(unittest.TestCase):
                     data={
                         "csrf_token": token,
                         "source_cvbankas": "on",
+                        "use_keywords": "on",
                         "keywords": "python developer\nfastapi",
                         "limit": "7",
                         "max_pages": "2",
@@ -181,6 +189,82 @@ class SearchImportTests(unittest.TestCase):
         self.assertEqual(captured["sources"], "cvbankas")
         self.assertIn("python developer", captured["keywords"])
         self.assertEqual(captured["limit"], 7)
+
+    def test_profile_search_derives_keywords_from_profile(self) -> None:
+        captured: dict = {}
+
+        def fake_run_batch(args, cfg=None) -> int:
+            captured["keywords"] = args.keywords
+            captured["cfg"] = cfg
+            print("batch done")
+            return 0
+
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _client(tmp)
+            token = _csrf(client, "/search")
+            with patch("cvbankas_tracker.web.run_batch", fake_run_batch):
+                resp = client.post(
+                    "/search/start",
+                    data={"csrf_token": token, "source_cvbankas": "on"},
+                    headers=HEADERS,
+                    follow_redirects=False,
+                )
+                self.assertEqual(resp.status_code, 303)
+                job_id = int(resp.headers["location"].rsplit("/", 1)[-1])
+                _wait_for_status(client, job_id, "done")
+        # The sample profile's additional_keywords seed the search, and they are
+        # injected per-source into the run config so run_batch actually uses them.
+        self.assertIn("fastapi", captured["keywords"])
+        self.assertIn("fastapi", captured["cfg"]["sources"]["keywords"]["cvbankas"])
+
+    def test_search_passes_prune_autosave_and_infinite_to_runner(self) -> None:
+        captured: dict = {}
+
+        def fake_run_batch(args, cfg=None) -> int:
+            captured["prune_threshold"] = args.prune_threshold
+            captured["auto_save"] = args.auto_save
+            captured["auto_save_threshold"] = args.auto_save_threshold
+            captured["infinite"] = args.infinite
+            print("done")
+            return 0
+
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _client(tmp)
+            token = _csrf(client, "/search")
+            with patch("cvbankas_tracker.web.run_batch", fake_run_batch):
+                resp = client.post(
+                    "/search/start",
+                    data={
+                        "csrf_token": token,
+                        "source_cvbankas": "on",
+                        "use_keywords": "on",
+                        "keywords": "python",
+                        "prune_threshold": "50",
+                        "auto_save": "on",
+                        "auto_save_threshold": "65",
+                        "infinite": "on",
+                    },
+                    headers=HEADERS,
+                    follow_redirects=False,
+                )
+                self.assertEqual(resp.status_code, 303)
+                job_id = int(resp.headers["location"].rsplit("/", 1)[-1])
+                _wait_for_status(client, job_id, "done")
+        self.assertEqual(captured["prune_threshold"], 50)
+        self.assertTrue(captured["auto_save"])
+        self.assertEqual(captured["auto_save_threshold"], 65)
+        self.assertTrue(captured["infinite"])
+
+    def test_keyword_search_without_keywords_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _client(tmp)
+            token = _csrf(client, "/search")
+            resp = client.post(
+                "/search/start",
+                data={"csrf_token": token, "source_cvbankas": "on", "use_keywords": "on"},
+                headers=HEADERS,
+            )
+            self.assertEqual(resp.status_code, 400)
 
     def test_start_search_requires_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -212,6 +296,40 @@ class SearchImportTests(unittest.TestCase):
                 job_id = int(resp.headers["location"].rsplit("/", 1)[-1])
                 snap = _wait_for_status(client, job_id, "done")
         self.assertIn("example.test", snap["log"])
+
+    def test_save_button_creates_saved_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "web.db"
+            url = "https://example.test/save-me"
+            db = DatabaseManager(db_path)
+            db.initialize()
+            db.save_processed_vacancy(
+                vacancy=Vacancy(
+                    source_name="sample", source_id="1", source_url=url,
+                    title="Role", company="Co", location="Remote",
+                    salary_text="", requirements=[], responsibilities=[],
+                ),
+                analysis=VacancyAnalysis(
+                    vacancy_source_url=url, analysis_method=AnalysisMethod.RULE_BASED,
+                    score=12, fit_label=FitLabel.LOW, explanation="x",
+                    matched_points=(), missing_points=(), notes="",
+                ),
+                auto_save=False,  # unsaved low-match vacancy
+            )
+            db.close()
+
+            client = TestClient(create_app(db_path), base_url=BASE)
+            token = _csrf(client, "/today")
+            self.assertIsNone(DatabaseManager(db_path).get_application_record(url))
+            resp = client.post(
+                "/vacancy/save",
+                data={"csrf_token": token, "vacancy_source_url": url},
+                headers=HEADERS,
+                follow_redirects=False,
+            )
+            self.assertEqual(resp.status_code, 303)
+            record = DatabaseManager(db_path).get_application_record(url)
+            self.assertIsNotNone(record)
 
     def test_start_search_rejected_without_origin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

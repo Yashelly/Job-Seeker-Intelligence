@@ -1312,6 +1312,8 @@ def _process_vacancy_url(
         original_source_url=url,
         application_origin=ApplicationStatusOrigin.SYSTEM,
         application_note=f"Created during the Job Seeker CLI run from {source.name}.",
+        auto_save=getattr(args, "auto_save", True),
+        auto_save_threshold=getattr(args, "auto_save_threshold", 0),
     )
     report_rows.append((vacancy, analysis, stored_application))
 
@@ -1533,6 +1535,13 @@ def _send_telegram_batch_summary(
     return True
 
 
+# Safety caps for "infinite" search: paginate/process up to these bounds, then
+# stop even if a source could keep returning pages. Natural exhaustion (a page
+# with no new listings) usually stops a run well before these are reached.
+INFINITE_MAX_PAGES = 100
+INFINITE_LIMIT = 100_000
+
+
 def run_batch(args: argparse.Namespace, cfg: dict | None = None) -> int:
     load_dotenv_if_present()
     cfg = cfg or {}
@@ -1548,6 +1557,13 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None) -> int:
     if args.listing_url and len(sources) > 1:
         raise ValueError("--listing-url can only be used when exactly one source is enabled.")
 
+    # "Infinite" search: keep paginating and processing until the sources run
+    # out of matching listings, bounded by hard safety caps so a run can never
+    # loop forever or hammer a site indefinitely.
+    if getattr(args, "infinite", False):
+        args.max_pages = max(int(args.max_pages or 1), INFINITE_MAX_PAGES)
+        args.limit = max(int(args.limit or 1), INFINITE_LIMIT)
+
     database = DatabaseManager(workspace / args.db)
     database.initialize()
     try:
@@ -1558,6 +1574,20 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None) -> int:
         return 3
     finally:
         database.close()
+
+    # Recent lifecycle: before collecting, drop low-match vacancies from earlier
+    # runs that were never saved. Web search sets prune_threshold; CLI leaves it
+    # unset so existing CLI behavior (no deletion) is preserved.
+    prune_threshold = getattr(args, "prune_threshold", None)
+    if prune_threshold is not None:
+        prune_db = DatabaseManager(workspace / args.db)
+        try:
+            removed = prune_db.prune_low_score_unsaved(int(prune_threshold))
+        finally:
+            prune_db.close()
+        if removed:
+            print(f"[{ts()}] Pruned {removed} unsaved vacancies below {int(prune_threshold)}% match.")
+
     report_writer = ReportFileWriter()
 
     source_results = _execute_source_batches(

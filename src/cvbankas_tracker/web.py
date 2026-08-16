@@ -201,6 +201,15 @@ def _positive_int(value: str | None, *, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
+def _clamp_percent(value: str | None, *, default: int) -> int:
+    """Parse a 0–100 percentage from form input, falling back to ``default``."""
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(100, parsed))
+
+
 def _backend_context(next_path: str) -> dict[str, Any]:
     return {
         "backend": resolve_ai_backend(),
@@ -242,9 +251,17 @@ def _runner_namespace(
     refresh: bool,
     import_urls: str = "",
     daily_run: bool = False,
+    prune_threshold: int | None = None,
+    auto_save: bool = True,
+    auto_save_threshold: int = 0,
+    infinite: bool = False,
 ) -> argparse.Namespace:
     effective_keywords = keywords or ["automation"]
     return argparse.Namespace(
+        prune_threshold=prune_threshold,
+        auto_save=auto_save,
+        auto_save_threshold=auto_save_threshold,
+        infinite=infinite,
         config="",
         profile=profile_path,
         db=str(db_path),
@@ -275,6 +292,35 @@ def _runner_namespace(
         note=None,
         export_tracked="",
     )
+
+
+_MAX_PROFILE_SEARCH_KEYWORDS = 12
+
+
+def _profile_search_keywords(profile_path: str) -> list[str]:
+    """Derive search terms from the active profile for profile-based search.
+
+    Prefers the profile's ``additional_keywords`` (which are written as short
+    search phrases) and falls back to the target role titles. Returns an empty
+    list when the profile cannot be read, so the caller can surface a clear
+    error instead of silently searching for nothing.
+    """
+    try:
+        profile = ProfileFileReader().read(profile_path)
+    except (OSError, ValueError, KeyError):
+        return []
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for term in [*profile.additional_keywords, *profile.target_roles]:
+        text = str(term).strip()
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        ordered.append(text)
+        if len(ordered) >= _MAX_PROFILE_SEARCH_KEYWORDS:
+            break
+    return ordered
 
 
 def _build_run_cfg(base_cfg: dict, enabled_sources: list[str], keywords: list[str]) -> dict:
@@ -358,12 +404,19 @@ def create_app(
         database = _db(request)
         preferences = database.get_inbox_preferences()
         latest_run = database.get_latest_inbox_run()
+        # Recent = every vacancy from the most recent run, regardless of score.
+        recent_items = database.query_inbox(
+            preferences=preferences,
+            new_only=False,
+            current_run_only=True,
+            include_below_threshold=True,
+        )
         return _render(
             templates,
             request,
             "today.html",
-            page_title="Today",
-            inbox_items=database.query_inbox(preferences=preferences, new_only=True),
+            page_title="Recent",
+            inbox_items=recent_items,
             reminders=database.query_action_reminders(),
             preferences=preferences,
             latest_run=latest_run,
@@ -411,13 +464,27 @@ def create_app(
             templates,
             request,
             "applications.html",
-            page_title="Applications",
+            page_title="Saved",
             applications=database.list_tracked_applications(),
             statuses=list(ApplicationStatus),
             actions=database.list_action_items(),
             vacancies=database.list_vacancies_with_latest_scores(),
             timezone=ActionService(database).resolve_user_timezone(),
         )
+
+    @app.post("/vacancy/save")
+    def save_vacancy(request: Request, form: dict[str, str] = Depends(require_safe_post)):
+        database = _db(request)
+        canonical_url = canonicalize_source_url(form.get("vacancy_source_url", ""))
+        if not canonical_url or database.get_vacancy(canonical_url) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Vacancy not found.")
+        ApplicationTracker(database).ensure_record(
+            canonical_url,
+            analysis_id=database.get_latest_analysis_id(canonical_url),
+            notes="Saved from the dashboard.",
+            origin=ApplicationStatusOrigin.WEB,
+        )
+        return _redirect(form.get("next") or "/today")
 
     @app.post("/applications/status")
     def update_application_status(request: Request, form: dict[str, str] = Depends(require_safe_post)):
@@ -546,6 +613,9 @@ def create_app(
             default_sources=["cvbankas", "hh", "justjoin"],
             default_limit=10,
             default_pages=1,
+            default_prune_threshold=40,
+            default_autosave_threshold=40,
+            profile_keywords=_profile_search_keywords(request.app.state.profile_path),
         )
 
     @app.post("/search/start")
@@ -553,7 +623,21 @@ def create_app(
         selected = [name for name in WEB_SOURCE_CHOICES if _coerce_bool(form.get(f"source_{name}"))]
         if not selected:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Select at least one source.")
-        keywords = parse_search_keywords(form.get("keywords", ""))
+        if _coerce_bool(form.get("use_keywords")):
+            keywords = parse_search_keywords(form.get("keywords", ""))
+            if not keywords:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Enter at least one keyword, or switch to profile search.",
+                )
+        else:
+            keywords = _profile_search_keywords(request.app.state.profile_path)
+            if not keywords:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "The active profile has no search terms. Tick "
+                    "“Search by specific keywords” and enter some.",
+                )
         strategy = form.get("analysis_strategy", "ai")
         if strategy not in _ALLOWED_STRATEGIES:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid analysis strategy.")
@@ -566,6 +650,10 @@ def create_app(
             max_pages=_positive_int(form.get("max_pages"), default=1),
             analysis_strategy=strategy,
             refresh=_coerce_bool(form.get("refresh")),
+            prune_threshold=_clamp_percent(form.get("prune_threshold"), default=40),
+            auto_save=_coerce_bool(form.get("auto_save")),
+            auto_save_threshold=_clamp_percent(form.get("auto_save_threshold"), default=40),
+            infinite=_coerce_bool(form.get("infinite")),
         )
         run_cfg = _build_run_cfg(request.app.state.cfg, selected, keywords)
         try:
