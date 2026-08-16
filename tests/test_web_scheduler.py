@@ -228,7 +228,7 @@ class ScheduleRoutesTests(unittest.TestCase):
             self.assertEqual(resp.status_code, 400)
 
     def test_run_now_starts_job(self) -> None:
-        def fake_run_batch(args, cfg=None) -> int:
+        def fake_run_batch(args, cfg=None, control=None) -> int:
             assert getattr(args, "daily_run", False) is True
             print("daily done")
             return 0
