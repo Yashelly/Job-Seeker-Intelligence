@@ -311,7 +311,14 @@ def _profile_search_keywords(profile_path: str) -> list[str]:
         return []
     seen: set[str] = set()
     ordered: list[str] = []
-    for term in [*profile.additional_keywords, *profile.target_roles]:
+    # Prefer explicit search keywords and target roles, then fall back to the
+    # candidate's skills so any non-empty profile still yields search terms.
+    for term in [
+        *profile.additional_keywords,
+        *profile.target_roles,
+        *profile.must_have_skills,
+        *profile.skills,
+    ]:
         text = str(term).strip()
         key = text.lower()
         if not text or key in seen:
