@@ -619,5 +619,54 @@ class BackendSwitchTests(unittest.TestCase):
             self._restore(prev)
 
 
+class ProfileActivationTests(unittest.TestCase):
+    def test_discovery_lists_valid_profiles_only(self) -> None:
+        from cvbankas_tracker.web import _discover_profile_files
+
+        profiles = _discover_profile_files(Path.cwd(), "sample_data/active_profile.json")
+        paths = {p["path"].replace("\\", "/") for p in profiles}
+        self.assertIn("profile_from_cv.json", paths)
+        self.assertIn("sample_data/active_profile.json", paths)
+        # config/scheduler.json is JSON but not a profile, so it must be skipped.
+        self.assertNotIn("config/scheduler.json", paths)
+        active = [p for p in profiles if p["is_active"]]
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0]["path"].replace("\\", "/"), "sample_data/active_profile.json")
+
+    def test_activate_switches_and_persists_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _client(tmp)
+            token = _csrf(client, "/profile")
+
+            before = client.get("/profile").text
+            self.assertRegex(before, r"Path:[^<]*active_profile\.json")
+
+            resp = client.post(
+                "/profile/activate",
+                headers=HEADERS,
+                data={"csrf_token": token, "profile_path": "profile_from_cv.json"},
+                follow_redirects=False,
+            )
+            self.assertEqual(resp.status_code, 303)
+
+            after = client.get("/profile").text
+            self.assertRegex(after, r"Path:[^<]*profile_from_cv\.json")
+
+    def test_activate_rejects_unknown_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _client(tmp)
+            token = _csrf(client, "/profile")
+            resp = client.post(
+                "/profile/activate",
+                headers=HEADERS,
+                data={"csrf_token": token, "profile_path": "does_not_exist.json"},
+                follow_redirects=False,
+            )
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn("Could not activate profile", resp.text)
+            # The active profile must be unchanged after a failed activation.
+            self.assertRegex(resp.text, r"Path:[^<]*active_profile\.json")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -908,6 +908,29 @@ def create_app(
             _db(request).save_active_profile_path(str(written))
         return _redirect("/profile")
 
+    @app.post("/profile/activate")
+    def activate_profile(request: Request, form: dict[str, str] = Depends(require_safe_post)):
+        """Point the app at an existing profile JSON without rebuilding from a CV."""
+        try:
+            target = resolve_web_profile_path(form.get("profile_path", ""), base_dir=Path.cwd())
+            if not target.is_file():
+                raise ValueError("File not found.")
+            # Reject anything that does not read back as a valid profile so the
+            # active path can never point at, say, a config file.
+            ProfileFileReader().read(target)
+        except Exception as error:
+            return _render(
+                templates,
+                request,
+                "profile.html",
+                page_title="Profile",
+                activate_error=f"Could not activate profile: {error}",
+                **_profile_page_context(request),
+            )
+        request.app.state.profile_path = str(target)
+        _db(request).save_active_profile_path(str(target))
+        return _redirect("/profile")
+
     def _profile_page_context(request: Request) -> dict[str, Any]:
         active_path = request.app.state.profile_path
         try:
@@ -917,11 +940,58 @@ def create_app(
         return {
             "active_path": active_path,
             "active_profile": active_profile,
+            "available_profiles": _discover_profile_files(Path.cwd(), active_path),
             "supported_suffixes": SUPPORTED_CV_SUFFIXES,
             **_backend_context("/profile"),
         }
 
     return app
+
+
+def _discover_profile_files(base_dir: Path, active_path: str) -> list[dict[str, Any]]:
+    """Find JSON files in the working tree that parse as a valid user profile.
+
+    Scans the top of ``base_dir`` and ``sample_data/`` (shallow, ``*.json`` only)
+    so the profile page can offer the user's own files — not just the sample — as
+    a one-click active profile. Files that do not read as a profile (config,
+    memory dumps) are skipped.
+    """
+    base = Path(base_dir).resolve()
+    try:
+        active_resolved = str(Path(active_path).resolve())
+    except Exception:
+        active_resolved = ""
+
+    reader = ProfileFileReader()
+    seen: set[str] = set()
+    profiles: list[dict[str, Any]] = []
+    for directory in (base, base / "sample_data"):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*.json")):
+            resolved = str(path.resolve())
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            try:
+                profile = reader.read(path)
+            except Exception:
+                continue
+            try:
+                relative = str(path.resolve().relative_to(base))
+            except ValueError:
+                relative = str(path)
+            profiles.append(
+                {
+                    "path": relative,
+                    "name": profile.name,
+                    "experience_level": profile.experience_level,
+                    "years_of_experience": profile.years_of_experience,
+                    "max_english_level": profile.max_english_level,
+                    "is_active": resolved == active_resolved,
+                }
+            )
+    return profiles
 
 
 def run_web(

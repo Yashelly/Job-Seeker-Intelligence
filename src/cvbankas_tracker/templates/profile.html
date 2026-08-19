@@ -15,6 +15,41 @@
   {% else %}
   <p class="muted">No valid active profile loaded.</p>
   {% endif %}
+
+  <h3>Switch active profile</h3>
+  <p class="muted">The app defaults to the bundled sample (Senior, 6 yrs). Point it at your own profile file so searches use it. The choice is saved across restarts.</p>
+  {% if activate_error %}<p class="error">{{ activate_error }}</p>{% endif %}
+  {% if available_profiles %}
+  <table>
+    <tbody>
+      {% for p in available_profiles %}
+      <tr>
+        <td>
+          <strong>{{ p.name }}</strong> — <code>{{ p.path }}</code><br>
+          <span class="muted">{{ p.experience_level }}{% if p.years_of_experience is not none %} · {{ p.years_of_experience }} yrs{% endif %}{% if p.max_english_level %} · English ≤ {{ p.max_english_level }}{% endif %}</span>
+        </td>
+        <td>
+          {% if p.is_active %}
+          <span class="muted">Active</span>
+          {% else %}
+          <form method="post" action="/profile/activate">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="profile_path" value="{{ p.path }}">
+            <button type="submit">Use this</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <form method="post" action="/profile/activate">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="profile_path">Or enter a profile file path</label>
+    <input id="profile_path" name="profile_path" placeholder="profile_from_cv.json">
+    <button type="submit">Set as active profile</button>
+  </form>
 </section>
 
 <section class="card">
