@@ -633,6 +633,7 @@ class JobSeekerTui:
         years = profile.get("years_of_experience")
         grid.add_row("Years", "-" if years is None else str(years))
         grid.add_row("Salary", str(profile.get("salary_expectation") or "-"))
+        grid.add_row("English ≤", str(profile.get("max_english_level") or "-"))
         for label, key in (
             ("Target roles", "target_roles"),
             ("Skills", "skills"),

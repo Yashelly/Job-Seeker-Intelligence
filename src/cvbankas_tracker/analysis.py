@@ -16,19 +16,213 @@ from .ai_cli import (
     run_claude_cli,
     run_codex_cli,
 )
-from .models import AnalysisMethod, FitLabel, UserProfile, Vacancy, VacancyAnalysis
+from .models import (
+    CEFR_LEVELS,
+    AnalysisMethod,
+    FitLabel,
+    UserProfile,
+    Vacancy,
+    VacancyAnalysis,
+    normalize_cefr_level,
+)
 
 ANALYSIS_SYSTEM_PROMPT = (
     "You analyze job vacancies against one user profile. "
     "Use role fit, must-have skills, nice-to-have skills, excluded keywords, "
     "experience fit, location fit, and salary fit when deciding the score. "
     "Strong technical matches should score clearly higher than loosely related roles. "
+    "If the profile sets max_english_level, treat any vacancy that requires English "
+    "above that CEFR level (e.g. C1 or C2, or 'fluent'/'native'/'advanced' English "
+    "when the ceiling is B2) as a strong mismatch and score it clearly lower. "
+    "If the profile sets work_modes, treat a vacancy whose work mode/location is not "
+    "among them as a strong mismatch (e.g. an on-site role in another country when "
+    "only remote or hybrid/office in a specific country are accepted). "
     "Return JSON with keys: score, fit_label, explanation, "
     "matched_points, missing_points, notes. "
     "score is an integer from 0 to 100. "
     'fit_label MUST be exactly one of "High", "Medium", or "Low" '
     "(High for score >= 75, Medium for 45-74, Low below 45)."
 )
+
+# 1-based rank for each CEFR level so required levels can be compared numerically.
+_CEFR_RANKS: dict[str, int] = {level.lower(): rank for rank, level in enumerate(CEFR_LEVELS, start=1)}
+_RANK_TO_LABEL: dict[int, str] = dict(enumerate(CEFR_LEVELS, start=1))
+
+# A bare CEFR token (a1..c2) as a whole word. Each occurrence is bound to the
+# nearest language marker so a level only counts when English is the closest
+# language, not when it belongs to some other language listed nearby.
+_CEFR_TOKEN = re.compile(r"\b([abc][12])\b")
+
+# How far (in characters) to look around a CEFR token for a language marker.
+_ENGLISH_BIND_WINDOW = 30
+
+# Language markers as (substring, is_english). Substrings are chosen to cover
+# both English ("english") and Lithuanian ("anglų"/"anglu") spellings, plus the
+# other languages that commonly appear in the same requirement lists so their
+# levels are correctly attributed away from English.
+_LANGUAGE_MARKERS: tuple[tuple[str, bool], ...] = (
+    ("english", True),
+    ("anglų", True),
+    ("anglu", True),
+    ("german", False),
+    ("deutsch", False),
+    ("vokie", False),
+    ("french", False),
+    ("prancu", False),
+    ("spanish", False),
+    ("ispan", False),
+    ("russian", False),
+    ("rusų", False),
+    ("rusu", False),
+    ("polish", False),
+    ("lenk", False),
+    ("italian", False),
+    ("lietuvi", False),
+    ("lithuanian", False),
+    ("latvian", False),
+    ("estonian", False),
+    ("ukrain", False),
+    ("dutch", False),
+    ("swedish", False),
+    ("norwegian", False),
+    ("danish", False),
+    ("portuguese", False),
+    ("chinese", False),
+)
+
+# Fluency phrases (all explicitly about English) that imply a required level
+# above plain B2. Mapped to the CEFR rank they roughly correspond to.
+_ENGLISH_FLUENCY_RANKS: tuple[tuple[str, int], ...] = (
+    ("native english", 6),
+    ("english native", 6),
+    ("native-level english", 6),
+    ("native level english", 6),
+    ("fluent english", 5),
+    ("fluent in english", 5),
+    ("fluency in english", 5),
+    ("english fluency", 5),
+    ("proficient in english", 5),
+    ("proficiency in english", 5),
+    ("advanced english", 5),
+    ("excellent english", 5),
+)
+
+
+def _cefr_token_is_english(text: str, start: int, end: int) -> bool:
+    """Whether the language marker nearest to a CEFR token span is English."""
+    lo = max(0, start - _ENGLISH_BIND_WINDOW)
+    hi = min(len(text), end + _ENGLISH_BIND_WINDOW)
+    nearest_distance: int | None = None
+    nearest_is_english = False
+    for marker, is_english in _LANGUAGE_MARKERS:
+        from_index = lo
+        while True:
+            idx = text.find(marker, from_index, hi)
+            if idx == -1:
+                break
+            marker_end = idx + len(marker)
+            if idx >= end:
+                distance = idx - end
+            elif marker_end <= start:
+                distance = start - marker_end
+            else:
+                distance = 0
+            if nearest_distance is None or distance < nearest_distance:
+                nearest_distance = distance
+                nearest_is_english = is_english
+            from_index = idx + 1
+    return nearest_is_english
+
+
+def _detect_required_english_level(searchable: str) -> int | None:
+    """Return the highest English CEFR rank a vacancy requires, or None.
+
+    Both explicit CEFR levels bound to English and English fluency phrases
+    contribute; the strictest (highest) signal wins. Absence of any signal
+    returns None so vacancies that never mention English are neither rewarded
+    nor penalized.
+    """
+    ranks: list[int] = []
+    for match in _CEFR_TOKEN.finditer(searchable):
+        rank = _CEFR_RANKS.get(match.group(1))
+        if rank is not None and _cefr_token_is_english(searchable, match.start(), match.end()):
+            ranks.append(rank)
+    for phrase, rank in _ENGLISH_FLUENCY_RANKS:
+        if phrase in searchable:
+            ranks.append(rank)
+    return max(ranks) if ranks else None
+
+
+def _english_level_rank(label: str | None) -> int | None:
+    canonical = normalize_cefr_level(label)
+    return _CEFR_RANKS.get(canonical.lower()) if canonical else None
+
+
+# Text signals for a vacancy's work mode. Hybrid is checked before remote so a
+# "hybrid (2 days remote)" posting is classed as hybrid, not remote.
+_HYBRID_TOKENS: tuple[str, ...] = ("hybrid", "hibridin", "hibridas", "hibridinis")
+_REMOTE_TOKENS: tuple[str, ...] = (
+    "remote",
+    "remotely",
+    "work from home",
+    "wfh",
+    "nuotolinis",
+    "nuotoliniu",
+    "nuotoliniai",
+    "nuotolinio",
+    "nuotoliniu budu",
+    "nuotoliniu būdu",
+)
+
+# Country -> match tokens (country name, local-language name, and major cities)
+# so a profile that names a country matches a vacancy that only names a city.
+# Seeded for the sources in use (LT/PL/EE/LV + common EU); easy to extend.
+_COUNTRY_ALIASES: dict[str, tuple[str, ...]] = {
+    "lithuania": ("lithuania", "lietuva", "vilnius", "kaunas", "klaipeda", "klaipėda",
+                  "siauliai", "šiauliai", "panevezys", "panevėžys"),
+    "latvia": ("latvia", "latvija", "riga", "rīga", "daugavpils"),
+    "estonia": ("estonia", "eesti", "tallinn", "tartu"),
+    "poland": ("poland", "polska", "warsaw", "warszawa", "krakow", "kraków", "wroclaw",
+               "wrocław", "gdansk", "gdańsk", "poznan", "poznań", "lodz", "łódź"),
+    "germany": ("germany", "deutschland", "berlin", "munich", "münchen", "hamburg",
+                "frankfurt", "cologne", "köln", "stuttgart"),
+    "netherlands": ("netherlands", "nederland", "holland", "amsterdam", "rotterdam", "utrecht"),
+    "spain": ("spain", "españa", "espana", "madrid", "barcelona", "valencia"),
+    "france": ("france", "paris", "lyon", "marseille"),
+    "united kingdom": ("united kingdom", "uk", "england", "london", "manchester", "scotland"),
+    "ukraine": ("ukraine", "ukraina", "україна", "kyiv", "kiev", "lviv"),
+    "sweden": ("sweden", "sverige", "stockholm", "gothenburg", "göteborg"),
+    "finland": ("finland", "suomi", "helsinki", "espoo", "tampere"),
+    "norway": ("norway", "norge", "oslo", "bergen"),
+    "denmark": ("denmark", "danmark", "copenhagen", "københavn"),
+    "czechia": ("czechia", "czech republic", "cesko", "česko", "prague", "praha", "brno"),
+    "ireland": ("ireland", "eire", "éire", "dublin", "cork"),
+    "portugal": ("portugal", "lisbon", "lisboa", "porto"),
+}
+
+
+def _country_match_tokens(country: str) -> tuple[str, ...]:
+    key = country.strip().lower()
+    if not key:
+        return ()
+    return _COUNTRY_ALIASES.get(key, (key,))
+
+
+def _country_in_text(country: str, searchable: str) -> bool:
+    return any(token in searchable for token in _country_match_tokens(country))
+
+
+def _detect_vacancy_work_mode(searchable: str) -> str:
+    """Classify a vacancy as 'remote', 'hybrid', or (by default) 'office'.
+
+    Absent an explicit remote/hybrid signal a role is assumed on-site, which is
+    the safe default for the on-site-heavy sources in use.
+    """
+    if any(token in searchable for token in _HYBRID_TOKENS):
+        return "hybrid"
+    if any(token in searchable for token in _REMOTE_TOKENS):
+        return "remote"
+    return "office"
 
 
 def build_analysis_prompt_payload(vacancy: Vacancy, profile: UserProfile) -> dict[str, object]:
@@ -54,6 +248,10 @@ def build_analysis_prompt_payload(vacancy: Vacancy, profile: UserProfile) -> dic
             "years_of_experience": profile.years_of_experience,
             "salary_expectation": profile.salary_expectation,
             "additional_keywords": profile.additional_keywords,
+            "max_english_level": profile.max_english_level,
+            "work_modes": [
+                {"mode": wm.mode, "country": wm.country} for wm in profile.work_modes
+            ],
         },
     }
 
@@ -248,12 +446,99 @@ def _calculate_rule_based_components(
         else:
             missing.append(experience_note)
 
+    english_score, english_note, english_ok = _english_level_match(vacancy, profile)
+    if english_note:
+        score += english_score
+        if english_ok:
+            matched.append(english_note)
+        else:
+            missing.append(english_note)
+
+    work_score, work_note, work_ok = _work_mode_match_score(vacancy, profile)
+    if work_note:
+        score += work_score
+        if work_ok:
+            matched.append(work_note)
+        else:
+            missing.append(work_note)
+
     excluded_matches = _match_terms(profile.excluded_keywords, searchable)
     if excluded_matches:
         score -= 40
         missing.append(f"Excluded profile keywords matched: {', '.join(excluded_matches)}")
 
     return max(0, min(100, score)), matched, missing
+
+
+def _english_level_match(vacancy: Vacancy, profile: UserProfile) -> tuple[int, str, bool]:
+    """Score a vacancy's English requirement against the profile's ceiling.
+
+    Returns (score_delta, note, within_limit). When the profile sets no ceiling
+    or the vacancy states no detectable English level, the delta is 0 and the
+    note is empty. A requirement above the ceiling is penalized by 40 — mirroring
+    the excluded-keyword penalty — so the vacancy drops below typical save
+    thresholds; a requirement at or below the ceiling is a small positive signal.
+    """
+    max_rank = _english_level_rank(profile.max_english_level)
+    if max_rank is None:
+        return 0, "", True
+
+    required_rank = _detect_required_english_level(vacancy.searchable_text)
+    if required_rank is None:
+        return 0, "", True
+
+    required_label = _RANK_TO_LABEL[required_rank]
+    max_label = _RANK_TO_LABEL[max_rank]
+    if required_rank > max_rank:
+        return (
+            -40,
+            f"English requirement ({required_label}) is above your {max_label} ceiling.",
+            False,
+        )
+    return (
+        5,
+        f"English requirement ({required_label}) is within your {max_label} ceiling.",
+        True,
+    )
+
+
+def _work_mode_match_score(vacancy: Vacancy, profile: UserProfile) -> tuple[int, str, bool]:
+    """Score a vacancy's work mode/location against the profile's preferences.
+
+    Returns (score_delta, note, within_preference). With no preferences the
+    delta is 0 and the note empty. A detected mode/country that matches a
+    preference is a small positive signal; one that matches none is penalized by
+    40 — mirroring the excluded-keyword penalty — so it drops below typical save
+    thresholds. Remote preferences ignore country; hybrid/office require the
+    named country (via its aliases) to appear in the vacancy text.
+    """
+    if not profile.work_modes:
+        return 0, "", True
+
+    searchable = vacancy.searchable_text
+    mode = _detect_vacancy_work_mode(searchable)
+    for preference in profile.work_modes:
+        if preference.mode != mode:
+            continue
+        if preference.mode == "remote":
+            return 10, "Remote role matches your work-mode preference.", True
+        if not preference.country or _country_in_text(preference.country, searchable):
+            where = preference.country or "your area"
+            return (
+                10,
+                f"{preference.mode.capitalize()} role in {where} matches your work-mode preference.",
+                True,
+            )
+
+    wanted = ", ".join(
+        pref.mode if pref.mode == "remote" else f"{pref.mode} ({pref.country})"
+        for pref in profile.work_modes
+    )
+    return (
+        -40,
+        f"Work mode ({mode}) is outside your preferences ({wanted}).",
+        False,
+    )
 
 
 def _match_terms(terms: list[str], searchable: str) -> list[str]:

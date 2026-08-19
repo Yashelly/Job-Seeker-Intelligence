@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from .ai_cli import AICLIError, parse_json_response, run_claude_cli, run_codex_cli
+from .models import normalize_cefr_level, normalize_work_modes
 
 CV_TEXT_LIMIT = 24000
 # Upper bound for a CV upload accepted over the web dashboard. Real resumes are
@@ -155,6 +156,8 @@ def normalize_profile_data(data: dict[str, object]) -> dict[str, object]:
     }
     for field_name in _LIST_FIELDS:
         profile[field_name] = _clean_list(data.get(field_name))
+    profile["max_english_level"] = normalize_cefr_level(data.get("max_english_level"))
+    profile["work_modes"] = normalize_work_modes(data.get("work_modes"))
     return profile
 
 

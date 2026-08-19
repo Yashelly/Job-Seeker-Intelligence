@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
 import tempfile
 import time
@@ -617,6 +619,147 @@ class BackendSwitchTests(unittest.TestCase):
                 self.assertEqual(resp.headers["location"], "/settings")
         finally:
             self._restore(prev)
+
+
+class ProfileActivationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Discovery and activation are constrained to the working tree, so put a
+        # real profile file there. It is created per-test and removed in
+        # tearDown so the suite stays hermetic — it must not rely on the user's
+        # gitignored profile_from_cv.json, which is absent on CI / fresh clones.
+        handle, name = tempfile.mkstemp(prefix="_test_profile_", suffix=".json", dir=Path.cwd())
+        os.close(handle)
+        self.repo_profile = Path(name)
+        self.repo_profile.write_text(
+            json.dumps(
+                {
+                    "name": "Discovery Test",
+                    "target_roles": ["developer"],
+                    "skills": ["python"],
+                    "preferred_locations": ["Remote"],
+                    "experience_level": "Junior",
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.repo_profile_name = self.repo_profile.name
+
+    def tearDown(self) -> None:
+        self.repo_profile.unlink(missing_ok=True)
+
+    def test_discovery_lists_valid_profiles_only(self) -> None:
+        from cvbankas_tracker.web import _discover_profile_files
+
+        profiles = _discover_profile_files(Path.cwd(), "sample_data/active_profile.json")
+        paths = {p["path"].replace("\\", "/") for p in profiles}
+        self.assertIn(self.repo_profile_name, paths)
+        self.assertIn("sample_data/active_profile.json", paths)
+        # config/scheduler.json is JSON but not a profile, so it must be skipped.
+        self.assertNotIn("config/scheduler.json", paths)
+        active = [p for p in profiles if p["is_active"]]
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0]["path"].replace("\\", "/"), "sample_data/active_profile.json")
+
+    def test_activate_switches_and_persists_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _client(tmp)
+            token = _csrf(client, "/profile")
+
+            before = client.get("/profile").text
+            self.assertRegex(before, r"Path:[^<]*active_profile\.json")
+
+            resp = client.post(
+                "/profile/activate",
+                headers=HEADERS,
+                data={"csrf_token": token, "profile_path": self.repo_profile_name},
+                follow_redirects=False,
+            )
+            self.assertEqual(resp.status_code, 303)
+
+            after = client.get("/profile").text
+            self.assertRegex(after, r"Path:[^<]*" + re.escape(self.repo_profile_name))
+
+    def test_activate_rejects_unknown_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _client(tmp)
+            token = _csrf(client, "/profile")
+            resp = client.post(
+                "/profile/activate",
+                headers=HEADERS,
+                data={"csrf_token": token, "profile_path": "does_not_exist.json"},
+                follow_redirects=False,
+            )
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn("Could not activate profile", resp.text)
+            # The active profile must be unchanged after a failed activation.
+            self.assertRegex(resp.text, r"Path:[^<]*active_profile\.json")
+
+
+class WorkModePersistenceTests(unittest.TestCase):
+    def _write_profile(self, path: Path) -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "name": "Temp",
+                    "target_roles": ["developer"],
+                    "skills": ["python"],
+                    "preferred_locations": ["Remote"],
+                    "experience_level": "Junior",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_save_work_modes_persists_to_active_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = Path(tmp) / "profile.json"
+            self._write_profile(profile_path)
+            client = _client(tmp)
+            # Point the app at the temp profile so the real sample is untouched.
+            client.app.state.profile_path = str(profile_path)
+
+            token = _csrf(client, "/profile")
+            resp = client.post(
+                "/profile/work-modes",
+                headers=HEADERS,
+                data={
+                    "csrf_token": token,
+                    "remote": "on",
+                    "hybrid": "on",
+                    "hybrid_country": "Lithuania",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(resp.status_code, 303)
+
+            saved = json.loads(profile_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                saved["work_modes"],
+                [
+                    {"mode": "remote", "country": ""},
+                    {"mode": "hybrid", "country": "Lithuania"},
+                ],
+            )
+            # The form now reflects the saved selection on reload.
+            page = client.get("/profile").text
+            self.assertIn("Lithuania", page)
+
+    def test_office_unchecked_clears_that_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = Path(tmp) / "profile.json"
+            self._write_profile(profile_path)
+            client = _client(tmp)
+            client.app.state.profile_path = str(profile_path)
+            token = _csrf(client, "/profile")
+            # Only office selected.
+            client.post(
+                "/profile/work-modes",
+                headers=HEADERS,
+                data={"csrf_token": token, "office": "on", "office_country": "Lithuania"},
+                follow_redirects=False,
+            )
+            saved = json.loads(profile_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["work_modes"], [{"mode": "office", "country": "Lithuania"}])
 
 
 if __name__ == "__main__":

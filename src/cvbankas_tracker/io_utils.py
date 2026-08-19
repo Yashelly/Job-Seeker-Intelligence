@@ -5,7 +5,14 @@ import json
 import re
 from pathlib import Path
 
-from .models import ApplicationRecord, UserProfile, Vacancy, VacancyAnalysis
+from .models import (
+    ApplicationRecord,
+    UserProfile,
+    Vacancy,
+    VacancyAnalysis,
+    normalize_cefr_level,
+    work_modes_from_dicts,
+)
 
 
 class ProfileFileReader:
@@ -24,6 +31,8 @@ class ProfileFileReader:
             must_have_skills=list(data.get("must_have_skills", [])),
             nice_to_have_skills=list(data.get("nice_to_have_skills", [])),
             excluded_keywords=list(data.get("excluded_keywords", [])),
+            max_english_level=normalize_cefr_level(data.get("max_english_level")),
+            work_modes=work_modes_from_dicts(data.get("work_modes")),
         )
 
 
