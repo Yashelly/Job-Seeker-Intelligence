@@ -34,6 +34,9 @@ ANALYSIS_SYSTEM_PROMPT = (
     "If the profile sets max_english_level, treat any vacancy that requires English "
     "above that CEFR level (e.g. C1 or C2, or 'fluent'/'native'/'advanced' English "
     "when the ceiling is B2) as a strong mismatch and score it clearly lower. "
+    "If the profile sets work_modes, treat a vacancy whose work mode/location is not "
+    "among them as a strong mismatch (e.g. an on-site role in another country when "
+    "only remote or hybrid/office in a specific country are accepted). "
     "Return JSON with keys: score, fit_label, explanation, "
     "matched_points, missing_points, notes. "
     "score is an integer from 0 to 100. "
@@ -155,6 +158,73 @@ def _english_level_rank(label: str | None) -> int | None:
     return _CEFR_RANKS.get(canonical.lower()) if canonical else None
 
 
+# Text signals for a vacancy's work mode. Hybrid is checked before remote so a
+# "hybrid (2 days remote)" posting is classed as hybrid, not remote.
+_HYBRID_TOKENS: tuple[str, ...] = ("hybrid", "hibridin", "hibridas", "hibridinis")
+_REMOTE_TOKENS: tuple[str, ...] = (
+    "remote",
+    "remotely",
+    "work from home",
+    "wfh",
+    "nuotolinis",
+    "nuotoliniu",
+    "nuotoliniai",
+    "nuotolinio",
+    "nuotoliniu budu",
+    "nuotoliniu būdu",
+)
+
+# Country -> match tokens (country name, local-language name, and major cities)
+# so a profile that names a country matches a vacancy that only names a city.
+# Seeded for the sources in use (LT/PL/EE/LV + common EU); easy to extend.
+_COUNTRY_ALIASES: dict[str, tuple[str, ...]] = {
+    "lithuania": ("lithuania", "lietuva", "vilnius", "kaunas", "klaipeda", "klaipėda",
+                  "siauliai", "šiauliai", "panevezys", "panevėžys"),
+    "latvia": ("latvia", "latvija", "riga", "rīga", "daugavpils"),
+    "estonia": ("estonia", "eesti", "tallinn", "tartu"),
+    "poland": ("poland", "polska", "warsaw", "warszawa", "krakow", "kraków", "wroclaw",
+               "wrocław", "gdansk", "gdańsk", "poznan", "poznań", "lodz", "łódź"),
+    "germany": ("germany", "deutschland", "berlin", "munich", "münchen", "hamburg",
+                "frankfurt", "cologne", "köln", "stuttgart"),
+    "netherlands": ("netherlands", "nederland", "holland", "amsterdam", "rotterdam", "utrecht"),
+    "spain": ("spain", "españa", "espana", "madrid", "barcelona", "valencia"),
+    "france": ("france", "paris", "lyon", "marseille"),
+    "united kingdom": ("united kingdom", "uk", "england", "london", "manchester", "scotland"),
+    "ukraine": ("ukraine", "ukraina", "україна", "kyiv", "kiev", "lviv"),
+    "sweden": ("sweden", "sverige", "stockholm", "gothenburg", "göteborg"),
+    "finland": ("finland", "suomi", "helsinki", "espoo", "tampere"),
+    "norway": ("norway", "norge", "oslo", "bergen"),
+    "denmark": ("denmark", "danmark", "copenhagen", "københavn"),
+    "czechia": ("czechia", "czech republic", "cesko", "česko", "prague", "praha", "brno"),
+    "ireland": ("ireland", "eire", "éire", "dublin", "cork"),
+    "portugal": ("portugal", "lisbon", "lisboa", "porto"),
+}
+
+
+def _country_match_tokens(country: str) -> tuple[str, ...]:
+    key = country.strip().lower()
+    if not key:
+        return ()
+    return _COUNTRY_ALIASES.get(key, (key,))
+
+
+def _country_in_text(country: str, searchable: str) -> bool:
+    return any(token in searchable for token in _country_match_tokens(country))
+
+
+def _detect_vacancy_work_mode(searchable: str) -> str:
+    """Classify a vacancy as 'remote', 'hybrid', or (by default) 'office'.
+
+    Absent an explicit remote/hybrid signal a role is assumed on-site, which is
+    the safe default for the on-site-heavy sources in use.
+    """
+    if any(token in searchable for token in _HYBRID_TOKENS):
+        return "hybrid"
+    if any(token in searchable for token in _REMOTE_TOKENS):
+        return "remote"
+    return "office"
+
+
 def build_analysis_prompt_payload(vacancy: Vacancy, profile: UserProfile) -> dict[str, object]:
     return {
         "vacancy": {
@@ -179,6 +249,9 @@ def build_analysis_prompt_payload(vacancy: Vacancy, profile: UserProfile) -> dic
             "salary_expectation": profile.salary_expectation,
             "additional_keywords": profile.additional_keywords,
             "max_english_level": profile.max_english_level,
+            "work_modes": [
+                {"mode": wm.mode, "country": wm.country} for wm in profile.work_modes
+            ],
         },
     }
 
@@ -381,6 +454,14 @@ def _calculate_rule_based_components(
         else:
             missing.append(english_note)
 
+    work_score, work_note, work_ok = _work_mode_match_score(vacancy, profile)
+    if work_note:
+        score += work_score
+        if work_ok:
+            matched.append(work_note)
+        else:
+            missing.append(work_note)
+
     excluded_matches = _match_terms(profile.excluded_keywords, searchable)
     if excluded_matches:
         score -= 40
@@ -418,6 +499,45 @@ def _english_level_match(vacancy: Vacancy, profile: UserProfile) -> tuple[int, s
         5,
         f"English requirement ({required_label}) is within your {max_label} ceiling.",
         True,
+    )
+
+
+def _work_mode_match_score(vacancy: Vacancy, profile: UserProfile) -> tuple[int, str, bool]:
+    """Score a vacancy's work mode/location against the profile's preferences.
+
+    Returns (score_delta, note, within_preference). With no preferences the
+    delta is 0 and the note empty. A detected mode/country that matches a
+    preference is a small positive signal; one that matches none is penalized by
+    40 — mirroring the excluded-keyword penalty — so it drops below typical save
+    thresholds. Remote preferences ignore country; hybrid/office require the
+    named country (via its aliases) to appear in the vacancy text.
+    """
+    if not profile.work_modes:
+        return 0, "", True
+
+    searchable = vacancy.searchable_text
+    mode = _detect_vacancy_work_mode(searchable)
+    for preference in profile.work_modes:
+        if preference.mode != mode:
+            continue
+        if preference.mode == "remote":
+            return 10, "Remote role matches your work-mode preference.", True
+        if not preference.country or _country_in_text(preference.country, searchable):
+            where = preference.country or "your area"
+            return (
+                10,
+                f"{preference.mode.capitalize()} role in {where} matches your work-mode preference.",
+                True,
+            )
+
+    wanted = ", ".join(
+        pref.mode if pref.mode == "remote" else f"{pref.mode} ({pref.country})"
+        for pref in profile.work_modes
+    )
+    return (
+        -40,
+        f"Work mode ({mode}) is outside your preferences ({wanted}).",
+        False,
     )
 
 

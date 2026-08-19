@@ -668,5 +668,72 @@ class ProfileActivationTests(unittest.TestCase):
             self.assertRegex(resp.text, r"Path:[^<]*active_profile\.json")
 
 
+class WorkModePersistenceTests(unittest.TestCase):
+    def _write_profile(self, path: Path) -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "name": "Temp",
+                    "target_roles": ["developer"],
+                    "skills": ["python"],
+                    "preferred_locations": ["Remote"],
+                    "experience_level": "Junior",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_save_work_modes_persists_to_active_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = Path(tmp) / "profile.json"
+            self._write_profile(profile_path)
+            client = _client(tmp)
+            # Point the app at the temp profile so the real sample is untouched.
+            client.app.state.profile_path = str(profile_path)
+
+            token = _csrf(client, "/profile")
+            resp = client.post(
+                "/profile/work-modes",
+                headers=HEADERS,
+                data={
+                    "csrf_token": token,
+                    "remote": "on",
+                    "hybrid": "on",
+                    "hybrid_country": "Lithuania",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(resp.status_code, 303)
+
+            saved = json.loads(profile_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                saved["work_modes"],
+                [
+                    {"mode": "remote", "country": ""},
+                    {"mode": "hybrid", "country": "Lithuania"},
+                ],
+            )
+            # The form now reflects the saved selection on reload.
+            page = client.get("/profile").text
+            self.assertIn("Lithuania", page)
+
+    def test_office_unchecked_clears_that_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = Path(tmp) / "profile.json"
+            self._write_profile(profile_path)
+            client = _client(tmp)
+            client.app.state.profile_path = str(profile_path)
+            token = _csrf(client, "/profile")
+            # Only office selected.
+            client.post(
+                "/profile/work-modes",
+                headers=HEADERS,
+                data={"csrf_token": token, "office": "on", "office_country": "Lithuania"},
+                follow_redirects=False,
+            )
+            saved = json.loads(profile_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["work_modes"], [{"mode": "office", "country": "Lithuania"}])
+
+
 if __name__ == "__main__":
     unittest.main()

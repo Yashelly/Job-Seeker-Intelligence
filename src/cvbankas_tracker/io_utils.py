@@ -11,6 +11,7 @@ from .models import (
     Vacancy,
     VacancyAnalysis,
     normalize_cefr_level,
+    work_modes_from_dicts,
 )
 
 
@@ -31,6 +32,7 @@ class ProfileFileReader:
             nice_to_have_skills=list(data.get("nice_to_have_skills", [])),
             excluded_keywords=list(data.get("excluded_keywords", [])),
             max_english_level=normalize_cefr_level(data.get("max_english_level")),
+            work_modes=work_modes_from_dicts(data.get("work_modes")),
         )
 
 

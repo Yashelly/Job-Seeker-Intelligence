@@ -10,6 +10,7 @@ from cvbankas_tracker.analysis import (
     VacancyAnalysisBuilder,
     VacancyAnalysisService,
     _detect_required_english_level,
+    _detect_vacancy_work_mode,
     _experience_match_score,
 )
 from cvbankas_tracker.models import (
@@ -17,7 +18,9 @@ from cvbankas_tracker.models import (
     FitLabel,
     UserProfile,
     Vacancy,
+    WorkMode,
     normalize_cefr_level,
+    normalize_work_modes,
 )
 
 
@@ -241,6 +244,101 @@ class EnglishLevelMatchTests(unittest.TestCase):
         # And an unset ceiling never emits an English note.
         analysis = self._analyze(vacancy, self._profile(None))
         self.assertFalse(any("ceiling" in point for point in analysis.missing_points))
+
+
+class WorkModeDetectionTests(unittest.TestCase):
+    def test_detects_modes_from_text(self) -> None:
+        self.assertEqual(_detect_vacancy_work_mode("fully remote python role"), "remote")
+        self.assertEqual(_detect_vacancy_work_mode("nuotolinis darbas"), "remote")
+        self.assertEqual(_detect_vacancy_work_mode("hybrid work in vilnius"), "hybrid")
+        # Hybrid wins over a co-occurring "remote" mention.
+        self.assertEqual(_detect_vacancy_work_mode("2 days remote, hybrid model"), "hybrid")
+        # No signal -> assumed on-site.
+        self.assertEqual(_detect_vacancy_work_mode("great team in vilnius"), "office")
+
+    def test_normalize_work_modes(self) -> None:
+        raw = [
+            {"mode": "Remote", "country": "Lithuania"},  # country cleared for remote
+            {"mode": "hybrid", "country": " Lithuania "},
+            "office",
+            {"mode": "hybrid", "country": "Poland"},  # duplicate mode dropped
+            {"mode": "bogus"},
+        ]
+        self.assertEqual(
+            normalize_work_modes(raw),
+            [
+                {"mode": "remote", "country": ""},
+                {"mode": "hybrid", "country": "Lithuania"},
+                {"mode": "office", "country": ""},
+            ],
+        )
+        self.assertEqual(normalize_work_modes("nonsense"), [])
+
+
+class WorkModeMatchTests(unittest.TestCase):
+    def _profile(self, modes: list[WorkMode]) -> UserProfile:
+        return UserProfile(
+            name="Candidate",
+            target_roles=["Python Developer"],
+            skills=["python"],
+            preferred_locations=["Remote"],
+            experience_level="Junior",
+            years_of_experience=1,
+            must_have_skills=["python"],
+            work_modes=modes,
+        )
+
+    def _vacancy(self, requirement: str) -> Vacancy:
+        return Vacancy(
+            source_id="1-8",
+            source_url="https://example.test/8",
+            title="Python Developer",
+            company="Test",
+            location="",
+            salary_text="",
+            requirements=[requirement],
+            responsibilities=[],
+        )
+
+    def _analyze(self, vacancy: Vacancy, profile: UserProfile):
+        service = VacancyAnalysisService(primary_strategy=RuleBasedAnalysisStrategy())
+        return service.analyze(vacancy, profile)
+
+    def test_onsite_penalized_when_only_remote_wanted(self) -> None:
+        vacancy = self._vacancy("On-site Python role in Vilnius")
+        capped = self._analyze(vacancy, self._profile([WorkMode("remote")]))
+        uncapped = self._analyze(vacancy, self._profile([]))
+        self.assertLess(capped.score, uncapped.score)
+        self.assertTrue(
+            any("outside your preferences" in point for point in capped.missing_points)
+        )
+
+    def test_office_country_matches_via_city_alias(self) -> None:
+        # Profile names the country; vacancy names only a city in it.
+        analysis = self._analyze(
+            self._vacancy("Office job in Kaunas"),
+            self._profile([WorkMode("office", "Lithuania")]),
+        )
+        self.assertTrue(
+            any("matches your work-mode preference" in point for point in analysis.matched_points)
+        )
+
+    def test_office_in_other_country_is_penalized(self) -> None:
+        analysis = self._analyze(
+            self._vacancy("Office job in Warsaw"),
+            self._profile([WorkMode("office", "Lithuania")]),
+        )
+        self.assertTrue(
+            any("outside your preferences" in point for point in analysis.missing_points)
+        )
+
+    def test_no_preference_leaves_work_mode_unscored(self) -> None:
+        analysis = self._analyze(
+            self._vacancy("On-site Python role in Vilnius"), self._profile([])
+        )
+        self.assertFalse(
+            any("work-mode" in point or "preferences" in point for point in analysis.missing_points)
+        )
 
 
 if __name__ == "__main__":

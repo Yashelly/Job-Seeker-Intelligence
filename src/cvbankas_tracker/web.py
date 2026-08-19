@@ -25,7 +25,13 @@ from .main import (
     run_batch,
     run_import,
 )
-from .models import ApplicationStatus, ApplicationStatusOrigin, InboxPreferences
+from .models import (
+    ApplicationStatus,
+    ApplicationStatusOrigin,
+    InboxPreferences,
+    UserProfile,
+    normalize_work_modes,
+)
 from .profile_builder import (
     AI_PROFILE_BACKENDS,
     MAX_CV_UPLOAD_BYTES,
@@ -931,6 +937,47 @@ def create_app(
         _db(request).save_active_profile_path(str(target))
         return _redirect("/profile")
 
+    @app.post("/profile/work-modes")
+    def save_work_modes(request: Request, form: dict[str, str] = Depends(require_safe_post)):
+        """Write the chosen work modes into the active profile file (persisted)."""
+        active_path = request.app.state.profile_path
+        try:
+            data = json.loads(Path(active_path).read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("Active profile is not a JSON object.")
+        except Exception as error:
+            return _render(
+                templates,
+                request,
+                "profile.html",
+                page_title="Profile",
+                work_modes_error=f"Could not update work modes: {error}",
+                **_profile_page_context(request),
+            )
+
+        selected: list[dict[str, str]] = []
+        if _coerce_bool(form.get("remote")):
+            selected.append({"mode": "remote", "country": ""})
+        if _coerce_bool(form.get("hybrid")):
+            selected.append({"mode": "hybrid", "country": form.get("hybrid_country", "")})
+        if _coerce_bool(form.get("office")):
+            selected.append({"mode": "office", "country": form.get("office_country", "")})
+        data["work_modes"] = normalize_work_modes(selected)
+
+        try:
+            write_profile_json(active_path, data)
+            ProfileFileReader().read(active_path)
+        except Exception as error:
+            return _render(
+                templates,
+                request,
+                "profile.html",
+                page_title="Profile",
+                work_modes_error=f"Could not save work modes: {error}",
+                **_profile_page_context(request),
+            )
+        return _redirect("/profile")
+
     def _profile_page_context(request: Request) -> dict[str, Any]:
         active_path = request.app.state.profile_path
         try:
@@ -941,11 +988,35 @@ def create_app(
             "active_path": active_path,
             "active_profile": active_profile,
             "available_profiles": _discover_profile_files(Path.cwd(), active_path),
+            "work_mode_form": _work_mode_form_values(active_profile),
             "supported_suffixes": SUPPORTED_CV_SUFFIXES,
             **_backend_context("/profile"),
         }
 
     return app
+
+
+def _work_mode_form_values(profile: UserProfile | None) -> dict[str, Any]:
+    """Flatten a profile's work modes into flags/countries for the edit form."""
+    values: dict[str, Any] = {
+        "remote": False,
+        "hybrid": False,
+        "hybrid_country": "",
+        "office": False,
+        "office_country": "",
+    }
+    if profile is None:
+        return values
+    for work_mode in profile.work_modes:
+        if work_mode.mode == "remote":
+            values["remote"] = True
+        elif work_mode.mode == "hybrid":
+            values["hybrid"] = True
+            values["hybrid_country"] = work_mode.country
+        elif work_mode.mode == "office":
+            values["office"] = True
+            values["office_country"] = work_mode.country
+    return values
 
 
 def _discover_profile_files(base_dir: Path, active_path: str) -> list[dict[str, Any]]:

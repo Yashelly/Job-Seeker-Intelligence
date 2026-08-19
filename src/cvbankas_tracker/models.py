@@ -21,6 +21,49 @@ def normalize_cefr_level(value: object) -> str | None:
     return text if text in CEFR_LEVELS else None
 
 
+# Work location modes a candidate can accept. "remote" carries no country;
+# "hybrid"/"office" are location-bound and pair with a country.
+WORK_MODES: tuple[str, ...] = ("remote", "hybrid", "office")
+
+
+@dataclass(frozen=True, slots=True)
+class WorkMode:
+    mode: str
+    country: str = ""
+
+
+def normalize_work_modes(value: object) -> list[dict[str, str]]:
+    """Coerce arbitrary input into a clean list of {mode, country} dicts.
+
+    Accepts a list of dicts or bare mode strings. Unknown modes are dropped,
+    country is cleared for "remote", and modes are de-duplicated while keeping
+    their first-seen order. Anything malformed degrades to an empty list so a
+    bogus value simply means "no work-mode preference".
+    """
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in value:
+        if isinstance(item, str):
+            mode, country = item.strip().lower(), ""
+        elif isinstance(item, dict):
+            mode = str(item.get("mode", "")).strip().lower()
+            country = str(item.get("country", "") or "").strip()
+        else:
+            continue
+        if mode not in WORK_MODES or mode in seen:
+            continue
+        seen.add(mode)
+        result.append({"mode": mode, "country": "" if mode == "remote" else country})
+    return result
+
+
+def work_modes_from_dicts(value: object) -> list[WorkMode]:
+    """Parse profile JSON work-mode data into WorkMode objects."""
+    return [WorkMode(mode=item["mode"], country=item["country"]) for item in normalize_work_modes(value)]
+
+
 class AnalysisMethod(StrEnum):
     AI_BASED = "ai_based"
     RULE_BASED = "rule_based"
@@ -107,6 +150,9 @@ class UserProfile:
     # (e.g. "B2"). When set, vacancies requiring English above this level are
     # penalized in analysis. None means no ceiling.
     max_english_level: str | None = None
+    # Accepted work location modes (remote / hybrid+country / office+country).
+    # Empty means no work-mode preference and no work-mode filtering.
+    work_modes: list[WorkMode] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

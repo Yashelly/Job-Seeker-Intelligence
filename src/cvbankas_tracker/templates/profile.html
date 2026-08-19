@@ -10,6 +10,7 @@
       <tr><th>Experience</th><td>{{ active_profile.experience_level }}{% if active_profile.years_of_experience is not none %} · {{ active_profile.years_of_experience }} yrs{% endif %}</td></tr>
       <tr><th>Target roles</th><td>{{ active_profile.target_roles|join(', ') }}</td></tr>
       <tr><th>Skills</th><td>{{ active_profile.skills|join(', ') }}</td></tr>
+      <tr><th>Work modes</th><td>{% if active_profile.work_modes %}{% for wm in active_profile.work_modes %}{{ wm.mode }}{% if wm.country %} ({{ wm.country }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}Any{% endif %}</td></tr>
     </tbody>
   </table>
   {% else %}
@@ -49,6 +50,35 @@
     <label for="profile_path">Or enter a profile file path</label>
     <input id="profile_path" name="profile_path" placeholder="profile_from_cv.json">
     <button type="submit">Set as active profile</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Work location preferences</h2>
+  <p class="muted">Pick which work modes to include in your search. Leave all unchecked to accept any. Hybrid/Office match the country you name — its major cities and local spelling count too (Lithuania matches Vilnius, Kaunas, Lietuva…). Saved into your active profile and remembered across restarts.</p>
+  {% if work_modes_error %}<p class="error">{{ work_modes_error }}</p>{% endif %}
+  <form method="post" action="/profile/work-modes">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="inline"><input type="checkbox" name="remote" value="on"{% if work_mode_form.remote %} checked{% endif %}> Remote (any country)</label>
+    <div class="row">
+      <div>
+        <label class="inline"><input type="checkbox" name="hybrid" value="on"{% if work_mode_form.hybrid %} checked{% endif %}> Hybrid</label>
+      </div>
+      <div>
+        <label for="hybrid_country">Hybrid country</label>
+        <input id="hybrid_country" name="hybrid_country" value="{{ work_mode_form.hybrid_country }}" placeholder="e.g. Lithuania">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label class="inline"><input type="checkbox" name="office" value="on"{% if work_mode_form.office %} checked{% endif %}> Office</label>
+      </div>
+      <div>
+        <label for="office_country">Office country</label>
+        <input id="office_country" name="office_country" value="{{ work_mode_form.office_country }}" placeholder="e.g. Lithuania">
+      </div>
+    </div>
+    <button type="submit">Save work preferences</button>
   </form>
 </section>
 
