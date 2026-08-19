@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
 import tempfile
 import time
@@ -620,12 +622,37 @@ class BackendSwitchTests(unittest.TestCase):
 
 
 class ProfileActivationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Discovery and activation are constrained to the working tree, so put a
+        # real profile file there. It is created per-test and removed in
+        # tearDown so the suite stays hermetic — it must not rely on the user's
+        # gitignored profile_from_cv.json, which is absent on CI / fresh clones.
+        handle, name = tempfile.mkstemp(prefix="_test_profile_", suffix=".json", dir=Path.cwd())
+        os.close(handle)
+        self.repo_profile = Path(name)
+        self.repo_profile.write_text(
+            json.dumps(
+                {
+                    "name": "Discovery Test",
+                    "target_roles": ["developer"],
+                    "skills": ["python"],
+                    "preferred_locations": ["Remote"],
+                    "experience_level": "Junior",
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.repo_profile_name = self.repo_profile.name
+
+    def tearDown(self) -> None:
+        self.repo_profile.unlink(missing_ok=True)
+
     def test_discovery_lists_valid_profiles_only(self) -> None:
         from cvbankas_tracker.web import _discover_profile_files
 
         profiles = _discover_profile_files(Path.cwd(), "sample_data/active_profile.json")
         paths = {p["path"].replace("\\", "/") for p in profiles}
-        self.assertIn("profile_from_cv.json", paths)
+        self.assertIn(self.repo_profile_name, paths)
         self.assertIn("sample_data/active_profile.json", paths)
         # config/scheduler.json is JSON but not a profile, so it must be skipped.
         self.assertNotIn("config/scheduler.json", paths)
@@ -644,13 +671,13 @@ class ProfileActivationTests(unittest.TestCase):
             resp = client.post(
                 "/profile/activate",
                 headers=HEADERS,
-                data={"csrf_token": token, "profile_path": "profile_from_cv.json"},
+                data={"csrf_token": token, "profile_path": self.repo_profile_name},
                 follow_redirects=False,
             )
             self.assertEqual(resp.status_code, 303)
 
             after = client.get("/profile").text
-            self.assertRegex(after, r"Path:[^<]*profile_from_cv\.json")
+            self.assertRegex(after, r"Path:[^<]*" + re.escape(self.repo_profile_name))
 
     def test_activate_rejects_unknown_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
