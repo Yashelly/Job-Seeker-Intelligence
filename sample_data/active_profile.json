@@ -71,6 +71,7 @@
   "experience_level": "Senior",
   "years_of_experience": 6,
   "salary_expectation": "1200 EUR",
+  "max_english_level": null,
   "must_have_skills": [
     "python",
     "automation",

@@ -3,6 +3,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+# CEFR language levels, ordered from lowest to highest proficiency. Used to
+# express and compare an English-level ceiling on a profile against the level a
+# vacancy requires.
+CEFR_LEVELS: tuple[str, ...] = ("A1", "A2", "B1", "B2", "C1", "C2")
+
+
+def normalize_cefr_level(value: object) -> str | None:
+    """Coerce an arbitrary value to a canonical CEFR level (e.g. 'B2') or None.
+
+    Anything that is not one of the six CEFR levels degrades to None so a bogus
+    profile value simply means "no English-level ceiling" instead of raising.
+    """
+    if value in (None, ""):
+        return None
+    text = str(value).strip().upper()
+    return text if text in CEFR_LEVELS else None
+
 
 class AnalysisMethod(StrEnum):
     AI_BASED = "ai_based"
@@ -86,6 +103,10 @@ class UserProfile:
     must_have_skills: list[str] = field(default_factory=list)
     nice_to_have_skills: list[str] = field(default_factory=list)
     excluded_keywords: list[str] = field(default_factory=list)
+    # Highest English level the candidate is comfortable with, as a CEFR level
+    # (e.g. "B2"). When set, vacancies requiring English above this level are
+    # penalized in analysis. None means no ceiling.
+    max_english_level: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
