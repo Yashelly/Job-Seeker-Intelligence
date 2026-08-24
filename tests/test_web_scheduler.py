@@ -230,6 +230,8 @@ class ScheduleRoutesTests(unittest.TestCase):
     def test_run_now_starts_job(self) -> None:
         def fake_run_batch(args, cfg=None, control=None) -> int:
             assert getattr(args, "daily_run", False) is True
+            assert args.auto_save is True
+            assert args.auto_save_threshold == 40
             print("daily done")
             return 0
 

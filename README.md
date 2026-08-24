@@ -187,6 +187,23 @@ job-seeker --today
 
 Exit codes: `0` useful output / rows written, `2` no matching rows or no new vacancies, `3` another run holds the database lease. See `job-seeker --help` for the full option set.
 
+### CV-Online full-feed crawl
+
+> **CV-Online collection rule — database required.** Do **not** collect this source with keywords, filters, or a pasted `--listing-url`: its public live-search filters are unreliable and are rejected by the adapter. `cvonline` always reads the unfiltered newest-first public feed (100 vacancies per page). SQLite is the source of truth for incremental collection: after the bootstrap it compares public vacancy URLs to the local database and processes only unseen ones.
+
+This source therefore has two explicit stages: full-feed bootstrap, then database-backed daily collection.
+
+```bash
+# First run: crawl all active CV-Online listings.  Matches at/above 40 are Saved.
+job-seeker --config config/cvonline.example.yaml --infinite
+
+# Later runs: fetch the newest 100 listings only, skip URLs already in SQLite,
+# score/save only unseen vacancies, and send the Telegram daily summary.
+job-seeker --config config/cvonline.example.yaml --daily-run
+```
+
+The dashboard also exposes `cvonline` as a source. For the initial import tick **Infinite search**; configure the daily scheduler with `cvonline`, one listing page, and a suitable limit. Scheduled runs auto-save scores at/above 40.
+
 ### Daily Telegram summary
 
 The daily run collects configured sources once, keeps only vacancies not already in SQLite, and sends the top new matches to Telegram.

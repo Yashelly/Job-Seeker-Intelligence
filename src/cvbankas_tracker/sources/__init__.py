@@ -1,5 +1,6 @@
 from .base import VacancySource
 from .cvbankas import CvbankasSource
+from .cvonline import CvOnlineSource
 from .euremotejobs import EuRemoteJobsSource
 from .generic_html import GenericHtmlJobSource
 from .hh import HhHtmlSource
@@ -10,6 +11,7 @@ from .startup_jobs import StartupJobsSource
 
 __all__ = [
     "CvbankasSource",
+    "CvOnlineSource",
     "EuRemoteJobsSource",
     "GenericHtmlJobSource",
     "HhHtmlSource",

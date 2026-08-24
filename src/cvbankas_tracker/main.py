@@ -202,8 +202,13 @@ def parse_args() -> argparse.Namespace:
         help="How many listing/search pages to crawl per enabled source.",
     )
     parser.add_argument(
+        "--infinite",
+        action="store_true",
+        help="Keep paginating until a source is exhausted (bounded by safety caps).",
+    )
+    parser.add_argument(
         "--source",
-        choices=("live", "sample", "cvbankas"),
+        choices=("live", "sample", "cvbankas", "cvonline"),
         default="live",
         help="Legacy single-source selector: live/cvbankas or local sample fixtures.",
     )
@@ -232,6 +237,25 @@ def parse_args() -> argparse.Namespace:
         "--refresh",
         action="store_true",
         help="Reprocess vacancies even if they already exist in the database.",
+    )
+    parser.add_argument(
+        "--auto-save",
+        dest="auto_save",
+        action="store_true",
+        default=None,
+        help="Create Saved application records for matches at the configured threshold.",
+    )
+    parser.add_argument(
+        "--no-auto-save",
+        dest="auto_save",
+        action="store_false",
+        help="Store and score vacancies without creating Saved application records.",
+    )
+    parser.add_argument(
+        "--auto-save-threshold",
+        type=int,
+        default=None,
+        help="Minimum match score required for automatic saving (0-100).",
     )
     parser.add_argument(
         "--tui",
@@ -1378,7 +1402,12 @@ def _run_source_batch(
             use_openai=args.analysis_strategy == "ai",
         )
         analysis_service = build_analysis_service(args.analysis_strategy, args.openai_model)
-        keywords = resolve_source_search_keywords(source.name, args, cfg)
+        keywords: list[str | None] = resolve_source_search_keywords(source.name, args, cfg)
+        if not getattr(source, "uses_search_keywords", True):
+            # CV-Online exposes the full public listing in newest-first order;
+            # its keyword endpoint is unreliable and repeating the full crawl
+            # once for every configured keyword would be wasteful.
+            keywords = [None]
         if args.listing_url:
             keywords = [args.keyword]
         listing_urls: list[str] = []
@@ -1423,14 +1452,24 @@ def _run_source_batch(
             return result
 
         result.total_pages = len(page_urls)
-        source_limit = min(len(listing_urls), args.limit)
+        # Daily runs must spend their vacancy-fetch budget on new
+        # ads, not on the newest known rows.  The listing still gets fetched so
+        # new jobs farther down the first page are picked up, but known URLs do
+        # not consume ``--limit`` or cause a detail request.
+        if getattr(args, "daily_run", False) and not args.refresh:
+            new_listing_urls = [
+                url for url in listing_urls if not database.has_vacancy(canonicalize_source_url(url))
+            ]
+        else:
+            new_listing_urls = listing_urls
+        source_limit = min(len(new_listing_urls), args.limit)
         print(
             f"[{ts()}] {source.name} batch started | pages={len(page_urls)} "
             f"| collected={len(listing_urls)} | keywords={len(keywords)} "
             f"| configured_max_pages={args.max_pages}"
         )
 
-        for index, url in enumerate(listing_urls[: args.limit], start=1):
+        for index, url in enumerate(new_listing_urls[: args.limit], start=1):
             control.wait_if_paused()
             if control.is_cancelled():
                 print(safe_console_text(f"[{ts()}] {source.name} search ended by user."))
@@ -1894,6 +1933,14 @@ def main() -> int:
         )
     if not _cli_option_present("--openai-model"):
         args.openai_model = _cfg_get(cfg, "openai_model", default=args.openai_model)
+    if args.auto_save is None:
+        args.auto_save = _cfg_bool(cfg, "collection", "auto_save", default=True)
+    if args.auto_save_threshold is None:
+        args.auto_save_threshold = int(
+            _cfg_get(cfg, "collection", "auto_save_threshold", default=0)
+        )
+    if not 0 <= args.auto_save_threshold <= 100:
+        raise SystemExit("--auto-save-threshold must be between 0 and 100.")
 
     args.enabled_sources = resolve_enabled_source_names(
         args,

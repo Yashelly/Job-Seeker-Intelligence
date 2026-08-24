@@ -1,0 +1,21 @@
+# CV-Online is a database-backed source, not a live-search source. Its keyword
+# and filter URLs are intentionally unsupported: crawl the unfiltered public
+# feed once, then the local SQLite URL history identifies daily new vacancies.
+profile: sample_data/active_profile.json
+db: job_seeker.db
+export: exports/cvonline_report.md
+analysis_strategy: rule
+sources:
+  enabled:
+    - cvonline
+search:
+  # Initial import: use --infinite (43 pages at 100 ads/page today).
+  # Daily runs only fetch the first newest-first page and process unseen ads.
+  limit: 100
+  max_pages: 1
+collection:
+  auto_save: true
+  auto_save_threshold: 40
+telegram:
+  max_vacancies: 20
+  notify_when_empty: false
