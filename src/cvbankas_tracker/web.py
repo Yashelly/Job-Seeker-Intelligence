@@ -56,7 +56,7 @@ _ALLOWED_STATUS = {status.value.lower(): status for status in ApplicationStatus}
 _ALLOWED_SORTS = {"score", "newest", "title", "company"}
 _ALLOWED_STRATEGIES = {"ai", "rule"}
 WEB_BACKEND_CHOICES = ("rule", "demo", "openai", "claude_cli", "codex_cli")
-WEB_SOURCE_CHOICES = ("cvbankas", "hh", "startup_jobs", "justjoin", "euremotejobs", "sample")
+WEB_SOURCE_CHOICES = ("cvonline", "cvbankas", "hh", "startup_jobs", "justjoin", "euremotejobs", "sample")
 _DEFAULT_EXPORT = "exports/job_seeker_report.md"
 _DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
 
@@ -371,6 +371,8 @@ def _start_daily_job(app: FastAPI, schedule: ScheduleConfig) -> int:
         analysis_strategy=strategy,
         refresh=False,
         daily_run=True,
+        auto_save=True,
+        auto_save_threshold=40,
     )
     run_cfg = _build_run_cfg(app.state.cfg, sources, keywords)
     try:

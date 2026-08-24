@@ -22,6 +22,7 @@ from .models import (
 from .parser import VacancyParser
 from .sources import (
     CvbankasSource,
+    CvOnlineSource,
     EuRemoteJobsSource,
     HhHtmlSource,
     JustJoinItSource,
@@ -41,6 +42,7 @@ __all__ = [
     "ApplicationTracker",
     "CvbankasCollector",
     "CvbankasSource",
+    "CvOnlineSource",
     "DatabaseManager",
     "DemoAIAnalysisClient",
     "EuRemoteJobsSource",

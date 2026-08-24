@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .base import VacancySource
 from .cvbankas import CvbankasSource
+from .cvonline import CvOnlineSource
 from .euremotejobs import EuRemoteJobsSource
 from .hh import HhHtmlSource
 from .justjoin_it import JustJoinItSource
@@ -34,6 +35,7 @@ def build_source_registry(
     )
     return {
         "cvbankas": CvbankasSource(),
+        "cvonline": CvOnlineSource(),
         "euremotejobs": euremotejobs_source,
         "eu_remote_jobs": euremotejobs_source,
         "hh": hh_source,
