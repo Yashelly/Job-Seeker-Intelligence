@@ -1413,6 +1413,7 @@ def _run_source_batch(
         listing_urls: list[str] = []
         page_urls: list[str] = []
         seen_urls: set[str] = set()
+        daily_run = getattr(args, "daily_run", False) and not args.refresh
 
         try:
             for keyword in keywords:
@@ -1441,6 +1442,13 @@ def _run_source_batch(
                     if vacancy_url in seen_urls:
                         continue
                     seen_urls.add(vacancy_url)
+                    # A daily run needs to keep looking past previously seen
+                    # listings.  Its limit applies to *new* vacancies, not the
+                    # first URLs on a results page, which are usually old ads.
+                    if daily_run and database.has_vacancy(
+                        canonicalize_source_url(vacancy_url)
+                    ):
+                        continue
                     listing_urls.append(vacancy_url)
                     if len(listing_urls) >= args.limit:
                         break
@@ -1456,7 +1464,7 @@ def _run_source_batch(
         # ads, not on the newest known rows.  The listing still gets fetched so
         # new jobs farther down the first page are picked up, but known URLs do
         # not consume ``--limit`` or cause a detail request.
-        if getattr(args, "daily_run", False) and not args.refresh:
+        if daily_run:
             new_listing_urls = [
                 url for url in listing_urls if not database.has_vacancy(canonicalize_source_url(url))
             ]

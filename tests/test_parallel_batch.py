@@ -13,6 +13,7 @@ from unittest.mock import patch
 from src.cvbankas_tracker.main import (
     SourceBatchResult,
     _execute_source_batches,
+    _run_source_batch,
     run_batch,
 )
 from src.cvbankas_tracker.models import Vacancy
@@ -59,7 +60,87 @@ class BatchSource:
         self.closed = True
 
 
+class DailyListingSource:
+    name = "daily_source"
+    uses_search_keywords = True
+    vacancy_request_delay_seconds = 0
+    listing_request_delay_seconds = 0
+
+    def __init__(self, urls: list[str]) -> None:
+        self._urls = urls
+        self.closed = False
+
+    def collect_vacancy_urls(self, **_kwargs) -> tuple[list[str], list[str]]:
+        return self._urls, ["https://example.test/daily/search"]
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class ParallelSourceBatchTests(unittest.TestCase):
+    def test_daily_run_uses_its_limit_for_new_urls_not_known_listings(self) -> None:
+        known_url = "https://example.test/daily/known"
+        first_new_url = "https://example.test/daily/new-1"
+        second_new_url = "https://example.test/daily/new-2"
+        source = DailyListingSource([known_url, first_new_url, second_new_url])
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            database = DatabaseManager(workspace / "jobs.db")
+            database.initialize()
+            database.save_vacancy(
+                Vacancy(
+                    source_name=source.name,
+                    source_id="known",
+                    source_url=known_url,
+                    title="Known vacancy",
+                    company="Example",
+                    location="Remote",
+                    salary_text="",
+                )
+            )
+            database.close()
+            args = Namespace(
+                db="jobs.db",
+                openai_model="gpt-4.1-mini",
+                analysis_strategy="rule",
+                listing_url="",
+                keyword="automation",
+                search_keywords=["automation"],
+                limit=2,
+                max_pages=1,
+                daily_run=True,
+                refresh=False,
+            )
+            processed_urls: list[str] = []
+
+            def record_processed_url(*, url: str, **_kwargs) -> None:
+                processed_urls.append(url)
+
+            with patch(
+                "src.cvbankas_tracker.main.resolve_source_search_keywords",
+                return_value=["automation"],
+            ), patch(
+                "src.cvbankas_tracker.main.build_extraction_service"
+            ), patch(
+                "src.cvbankas_tracker.main.build_analysis_service"
+            ), patch(
+                "src.cvbankas_tracker.main._process_vacancy_url",
+                side_effect=record_processed_url,
+            ):
+                result = _run_source_batch(
+                    source,
+                    args=args,
+                    cfg={},
+                    workspace=workspace,
+                    profile=None,
+                )
+
+        self.assertEqual(processed_urls, [first_new_url, second_new_url])
+        self.assertEqual(result.attempted_count, 2)
+        self.assertEqual(result.observed_count, 2)
+        self.assertTrue(source.closed)
+
     def test_source_workers_start_in_parallel_and_results_keep_source_order(self) -> None:
         sources = [StubSource("first"), StubSource("second")]
         start_barrier = threading.Barrier(len(sources), timeout=2)
