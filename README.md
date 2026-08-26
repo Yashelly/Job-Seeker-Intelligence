@@ -25,6 +25,12 @@ A local-first job-search engine that ingests vacancies from unreliable external 
 - **One domain, three interfaces.** The CLI, the Rich TUI, and the FastAPI dashboard are thin surfaces over the same shared run/import/tracking services — not three parallel implementations.
 - **Reproducibility.** A zero-config offline demo and a CI gate that runs Ruff, the full unit suite, and a `--demo` smoke test with no credentials present.
 
+## Engineering approach
+
+This project follows the same engineering principles I use across software and AI-assisted development: ground truth over assumptions, root cause over local patches, defensive handling of uncertain inputs, adversarial verification, bounded failure modes, and explainable decisions.
+
+**[Read my Engineering Principles →](https://github.com/Yashelly/Yashelly/blob/main/ENGINEERING_PRINCIPLES.md)**
+
 ## Architecture
 
 ```mermaid
