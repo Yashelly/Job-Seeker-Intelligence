@@ -382,6 +382,17 @@ def _start_daily_job(app: FastAPI, schedule: ScheduleConfig) -> int:
     return job.id
 
 
+def _daily_job_outcome(app: FastAPI, job_id: int) -> str | None:
+    """Report a started daily job's status so the scheduler can confirm success.
+
+    Returns the in-memory job status ("running" | "paused" | "done" | "error" |
+    "cancelled"), or ``None`` when the job is unknown (e.g. after a restart), which
+    the scheduler treats as a lost/failed run.
+    """
+    job = app.state.jobs.get(job_id)
+    return job.status if job is not None else None
+
+
 def create_app(
     db_path: str | Path,
     *,
@@ -392,6 +403,14 @@ def create_app(
     resolved_db_path = Path(db_path).expanduser().resolve()
     if bootstrap:
         bootstrap_database(resolved_db_path)
+        # Reap any collection run left ``running`` by a previous crash/kill so a
+        # stranded lease cannot block the first batch after restart (audit #1).
+        try:
+            reaped = DatabaseManager(resolved_db_path).recover_stranded_collection_runs()
+            if reaped:
+                print(f"[startup] recovered {reaped} stranded collection run(s).")
+        except Exception:
+            pass
         # First-run timezone discovery is display-only until the user saves the
         # Settings form; do not silently persist a confirmed timezone at startup.
 
@@ -413,6 +432,7 @@ def create_app(
     app.state.scheduler = DailyScheduler(
         resolved_db_path.parent / "scheduler.json",
         lambda schedule: _start_daily_job(app, schedule),
+        outcome_getter=lambda job_id: _daily_job_outcome(app, job_id),
     )
     root = Path(__file__).resolve().parent
     templates = Jinja2Templates(directory=str(root / "templates"))
@@ -712,7 +732,7 @@ def create_app(
         )
         run_cfg = _build_run_cfg(request.app.state.cfg, list(WEB_SOURCE_CHOICES), [])
         try:
-            job = request.app.state.jobs.start("import", lambda control: run_import(args, run_cfg))
+            job = request.app.state.jobs.start("import", lambda control: run_import(args, run_cfg, control=control))
         except JobConflictError as error:
             raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
         return _redirect(f"/jobs/{job.id}")

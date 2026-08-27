@@ -333,7 +333,7 @@ class SearchImportTests(unittest.TestCase):
             self.assertEqual(resp.status_code, 400)
 
     def test_start_import_runs_job(self) -> None:
-        def fake_run_import(args, cfg=None) -> int:
+        def fake_run_import(args, cfg=None, *, control=None) -> int:
             print("import " + args.import_urls)
             return 0
 

@@ -8,8 +8,11 @@ next to the database as ``scheduler.json`` and edited from the ``/schedule`` pag
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
+import tempfile
 import threading
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -19,10 +22,20 @@ from pathlib import Path
 _TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 DEFAULT_SOURCES = ("cvbankas", "hh", "justjoin")
 DEFAULT_CHECK_INTERVAL = 30.0
+# A daily job that starts but then fails is retried, bounded to this many starts
+# per day so a job that fails instantly (e.g. a stranded lease -> exit 3) cannot
+# spin forever; after the cap the day is marked durably ``failed``.
+MAX_DAILY_ATTEMPTS = 3
 
 # A runner starts the daily job and returns its job id, or raises. It is injected
 # by the web layer so this module stays free of FastAPI / run_batch imports.
 Runner = Callable[["ScheduleConfig"], int]
+# Resolves a started job id to its current job status
+# ("running" | "paused" | "done" | "error" | "cancelled"), or ``None`` if the job
+# is unknown (e.g. the process restarted and the in-memory job is gone). Injected
+# so the scheduler can confirm a run actually *succeeded* rather than merely
+# starting -- otherwise a job that fails after launch is recorded as a done day.
+OutcomeGetter = Callable[[int], str | None]
 
 
 class ScheduleError(ValueError):
@@ -62,10 +75,12 @@ class ScheduleConfig:
     max_pages: int = 1
     analysis_strategy: str = "ai"
     # Bookkeeping (not user-edited directly):
-    last_run_date: str = ""  # local YYYY-MM-DD; guards one-run-per-day
-    last_status: str = ""  # started | conflict | error | ""
+    last_run_date: str = ""  # local YYYY-MM-DD; guards one-run-per-day (set only on success)
+    last_status: str = ""  # running | completed | failed | cancelled | conflict | error | started | ""
     last_run_at: str = ""  # local ISO timestamp of the last attempt
     last_job_id: int | None = None
+    attempts: int = 0  # daily-job starts attempted today (bounds retry after failure)
+    last_attempt_date: str = ""  # local YYYY-MM-DD the attempt counter belongs to
 
     def time_hm(self) -> tuple[int, int]:
         hour, minute = self.time.split(":")
@@ -98,13 +113,35 @@ def load_schedule(path: Path) -> ScheduleConfig:
     cfg.max_pages = _positive_int(cfg.max_pages, default=1)
     cfg.analysis_strategy = str(cfg.analysis_strategy or "ai")
     cfg.last_run_date = str(cfg.last_run_date or "")
+    cfg.attempts = max(0, _positive_int(cfg.attempts, default=0))
+    cfg.last_attempt_date = str(cfg.last_attempt_date or "")
     return cfg
 
 
 def save_schedule(path: Path, config: ScheduleConfig) -> None:
+    """Persist the schedule atomically: a crash mid-write leaves the prior file.
+
+    Writing straight over the target risks a torn/empty ``scheduler.json`` on
+    power loss or a full disk (audit finding #6). Instead write a sibling temp
+    file, flush+fsync it, then ``os.replace`` -- an atomic rename on the same
+    filesystem -- so a reader ever sees only the old or the new complete file.
+    """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")
+    payload = json.dumps(asdict(config), indent=2)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
 
 
 class DailyScheduler:
@@ -120,12 +157,14 @@ class DailyScheduler:
         config_path: Path | str,
         runner: Runner,
         *,
+        outcome_getter: OutcomeGetter | None = None,
         config: ScheduleConfig | None = None,
         clock: Callable[[], datetime] = datetime.now,
         check_interval: float = DEFAULT_CHECK_INTERVAL,
     ) -> None:
         self._path = Path(config_path)
         self._runner = runner
+        self._outcome_getter = outcome_getter
         self._config = config if config is not None else load_schedule(self._path)
         self._clock = clock
         self._interval = check_interval
@@ -134,6 +173,7 @@ class DailyScheduler:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_loop_error = ""
+        self._last_persist_error = ""
 
     # -- configuration ---------------------------------------------------
     @property
@@ -168,10 +208,19 @@ class DailyScheduler:
         return snapshot
 
     def _persist_locked(self) -> None:
+        # Persisting must never crash the scheduler thread, but a failure is now
+        # recorded and surfaced instead of silently swallowed (audit finding #6).
         try:
             save_schedule(self._path, self._config)
-        except OSError:
-            pass
+            self._last_persist_error = ""
+        except OSError as error:
+            self._last_persist_error = repr(error)
+            print(f"[scheduler] failed to persist schedule to {self._path}: {error}")
+
+    @property
+    def last_persist_error(self) -> str:
+        with self._lock:
+            return self._last_persist_error
 
     # -- lifecycle -------------------------------------------------------
     def start(self) -> None:
@@ -202,10 +251,22 @@ class DailyScheduler:
 
     # -- core decision ---------------------------------------------------
     def tick(self, now: datetime | None = None) -> bool:
-        """Fire the job if it is due. Returns True if a run was started."""
+        """Fire the job if it is due. Returns True if a run was started.
+
+        When an ``outcome_getter`` is configured, a started job's ``last_run_date``
+        (the one-run-per-day guard) is committed only once its terminal status
+        confirms success. A job that fails *after* launching is recorded as
+        ``failed`` and retried, bounded by ``MAX_DAILY_ATTEMPTS`` -- rather than
+        being silently treated as a completed day (audit finding #5).
+        """
         moment = now or self._clock()
         today = moment.date().isoformat()
         with self._lock:
+            # Resolve a previously-started async job before any fire decision.
+            if self._config.last_status == "running" and self._outcome_getter is not None:
+                if not self._resolve_pending_locked(moment, today):
+                    return False  # still in flight -- do not fire again or mark done
+
             if not self._config.enabled:
                 return False
             if self._config.last_run_date == today:
@@ -213,12 +274,25 @@ class DailyScheduler:
             hour, minute = self._config.time_hm()
             if (moment.hour, moment.minute) < (hour, minute):
                 return False
+
+            # Reset the per-day attempt counter when the day rolls over.
+            if self._config.last_attempt_date != today:
+                self._config.attempts = 0
+                self._config.last_attempt_date = today
+            if self._config.attempts >= MAX_DAILY_ATTEMPTS:
+                # Retries exhausted: stop for the day, but record it as failed
+                # rather than a success so the durable state stays honest.
+                self._config.last_run_date = today
+                if self._config.last_status not in {"failed", "cancelled"}:
+                    self._config.last_status = "failed"
+                self._persist_locked()
+                return False
+
             config_snapshot = ScheduleConfig(**asdict(self._config))
 
         # Run the job outside the lock; the runner may block briefly on start.
         try:
             job_id = self._runner(config_snapshot)
-            status_text, run_date = "started", today
         except SchedulerBusyError:  # busy: retry on the next tick
             with self._lock:
                 self._config.last_status = "conflict"
@@ -229,16 +303,49 @@ class DailyScheduler:
             with self._lock:
                 self._config.last_status = f"error: {error}"[:200]
                 self._config.last_run_at = moment.isoformat(timespec="seconds")
-                self._config.last_run_date = today  # avoid tight error loop
+                self._config.last_run_date = today  # start failed hard -> avoid tight error loop
                 self._persist_locked()
             return False
 
         with self._lock:
-            self._config.last_run_date = run_date
-            self._config.last_status = status_text
+            self._config.attempts += 1
             self._config.last_run_at = moment.isoformat(timespec="seconds")
             self._config.last_job_id = int(job_id) if job_id is not None else None
+            if self._outcome_getter is None:
+                # No async outcome channel: a successful start guards one-per-day
+                # (legacy behavior; the daily job's own logs remain the record).
+                self._config.last_run_date = today
+                self._config.last_status = "started"
+            else:
+                # Success is confirmed later from the job's terminal status.
+                self._config.last_status = "running"
             self._persist_locked()
+        return True
+
+    def _resolve_pending_locked(self, moment: datetime, today: str) -> bool:
+        """Resolve the previously-started job. Returns False while still in flight.
+
+        Caller holds ``self._lock``. ``done`` confirms the day; ``cancelled``
+        records a user abort (no auto-retry today); anything else -- including a
+        job lost to a process restart (``None``) -- is a failure that leaves
+        ``last_run_date`` unset so a bounded retry can fire.
+        """
+        assert self._outcome_getter is not None
+        job_id = self._config.last_job_id
+        outcome = self._outcome_getter(int(job_id)) if job_id is not None else None
+        if outcome in {"running", "paused"}:
+            return False  # genuinely still running
+        self._config.last_job_id = None
+        if outcome == "done":
+            self._config.last_run_date = today
+            self._config.last_status = "completed"
+        elif outcome == "cancelled":
+            self._config.last_run_date = today  # aborted by user; don't auto-retry today
+            self._config.last_status = "cancelled"
+        else:  # "error", unknown, or lost job -> failed; retry if attempt budget remains
+            self._config.last_status = "failed"
+        self._config.last_run_at = self._config.last_run_at or moment.isoformat(timespec="seconds")
+        self._persist_locked()
         return True
 
     def next_run(self, now: datetime | None = None) -> datetime:

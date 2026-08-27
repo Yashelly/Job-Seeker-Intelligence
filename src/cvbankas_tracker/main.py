@@ -1598,6 +1598,12 @@ def _send_telegram_batch_summary(
 INFINITE_MAX_PAGES = 100
 INFINITE_LIMIT = 100_000
 
+# A collection run still marked ``running`` after this many seconds cannot be a
+# live in-process run (the dashboard allows only one job at a time and a real
+# batch finishes far sooner); it is a lease stranded by a crash/kill and is safe
+# to reap so the next batch is not permanently blocked.
+STALE_COLLECTION_RUN_SECONDS = 6 * 3600
+
 
 def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: JobControl | None = None) -> int:
     load_dotenv_if_present()
@@ -1629,70 +1635,100 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
     try:
         collection_run = database.begin_collection_run()
     except CollectionRunAlreadyActive as error:
-        print(safe_console_text(f"[{ts()}] COLLECTION RUN ACTIVE | {error}"))
-        database.close()
-        return 3
-    finally:
-        database.close()
-
-    # Recent lifecycle: before collecting, drop low-match vacancies from earlier
-    # runs that were never saved. Web search sets prune_threshold; CLI leaves it
-    # unset so existing CLI behavior (no deletion) is preserved.
-    prune_threshold = getattr(args, "prune_threshold", None)
-    if prune_threshold is not None:
-        prune_db = DatabaseManager(workspace / args.db)
+        # A lease left behind by a crashed/killed run would otherwise block every
+        # future batch forever. Reap runs that are provably stale and retry once;
+        # a genuinely fresh concurrent run is younger than the threshold and is
+        # left untouched, so we still refuse rather than clobber it.
+        reaped = database.recover_stranded_collection_runs(
+            older_than_seconds=STALE_COLLECTION_RUN_SECONDS
+        )
+        if not reaped:
+            print(safe_console_text(f"[{ts()}] COLLECTION RUN ACTIVE | {error}"))
+            return 3
+        print(safe_console_text(f"[{ts()}] Recovered {reaped} stranded collection run(s); retrying."))
         try:
-            removed = prune_db.prune_low_score_unsaved(int(prune_threshold))
-        finally:
-            prune_db.close()
-        if removed:
-            print(f"[{ts()}] Pruned {removed} unsaved vacancies below {int(prune_threshold)}% match.")
+            collection_run = database.begin_collection_run()
+        except CollectionRunAlreadyActive as retry_error:
+            print(safe_console_text(f"[{ts()}] COLLECTION RUN ACTIVE | {retry_error}"))
+            return 3
 
     report_writer = ReportFileWriter()
+    source_results: list[SourceBatchResult] = []
+    report_rows: list[tuple[Vacancy, VacancyAnalysis, ApplicationRecord | None]] = []
+    run_error: BaseException | None = None
+    # Everything from here until the run is finalized must run under a guard that
+    # releases the collection lease on *every* exit path -- normal, cancelled, an
+    # unexpected source/prune exception, or even a KeyboardInterrupt -- otherwise
+    # the run stays ``running`` and blocks the next batch (audit High #1).
+    try:
+        # Recent lifecycle: before collecting, drop low-match vacancies from earlier
+        # runs that were never saved. Web search sets prune_threshold; CLI leaves it
+        # unset so existing CLI behavior (no deletion) is preserved.
+        prune_threshold = getattr(args, "prune_threshold", None)
+        if prune_threshold is not None:
+            removed = database.prune_low_score_unsaved(int(prune_threshold))
+            if removed:
+                print(f"[{ts()}] Pruned {removed} unsaved vacancies below {int(prune_threshold)}% match.")
 
-    source_results = _execute_source_batches(
-        sources,
-        lambda source: _run_source_batch(
-            source,
-            args=args,
-            cfg=cfg,
-            workspace=workspace,
-            profile=profile,
-            collection_run_id=collection_run.id,
-            control=control,
-        ),
-    )
-    report_rows = [
-        row
-        for source_result in source_results
-        for row in source_result.report_rows
-    ]
-    failed_count = sum(result.failed_count for result in source_results)
-    attempted_count = sum(result.attempted_count for result in source_results)
-    total_pages = sum(result.total_pages for result in source_results)
-
-    terminal_database = DatabaseManager(workspace / args.db)
-    terminal_status = _collection_terminal_status(source_results, report_rows)
-    terminal_database.finish_collection_run(
-        collection_run.id,
-        status=terminal_status,
-        source_summary={
-            result.source_name: {
-                "attempted": result.attempted_count,
-                "failed": result.failed_count,
-                "observed": result.observed_count,
-                "saved": len(result.report_rows),
-                "pages": result.total_pages,
-            }
-            for result in source_results
-        },
-        error_summary={
+        source_results = _execute_source_batches(
+            sources,
+            lambda source: _run_source_batch(
+                source,
+                args=args,
+                cfg=cfg,
+                workspace=workspace,
+                profile=profile,
+                collection_run_id=collection_run.id,
+                control=control,
+            ),
+        )
+        report_rows = [
+            row
+            for source_result in source_results
+            for row in source_result.report_rows
+        ]
+    except BaseException as error:  # noqa: BLE001 -- finalize the lease, then re-raise
+        run_error = error
+        raise
+    finally:
+        # Cancellation is a first-class terminal state, distinct from a clean
+        # ``completed`` (audit High #3): a user-aborted run must never be recorded
+        # as authoritative in collection history.
+        if control.is_cancelled():
+            terminal_status = "cancelled"
+        elif run_error is not None:
+            terminal_status = "failed"
+        else:
+            terminal_status = _collection_terminal_status(source_results, report_rows)
+        error_summary: dict[str, object] = {
             result.source_name: result.failed_count
             for result in source_results
             if result.failed_count
-        },
-    )
-    terminal_database.close()
+        }
+        if run_error is not None:
+            error_summary["__run__"] = repr(run_error)[:500]
+        try:
+            database.finish_collection_run(
+                collection_run.id,
+                status=terminal_status,
+                source_summary={
+                    result.source_name: {
+                        "attempted": result.attempted_count,
+                        "failed": result.failed_count,
+                        "observed": result.observed_count,
+                        "saved": len(result.report_rows),
+                        "pages": result.total_pages,
+                    }
+                    for result in source_results
+                },
+                error_summary=error_summary,
+            )
+        except Exception as finish_error:  # noqa: BLE001
+            print(safe_console_text(f"[{ts()}] COLLECTION FINALIZE ERROR | {finish_error}"))
+
+    failed_count = sum(result.failed_count for result in source_results)
+    attempted_count = sum(result.attempted_count for result in source_results)
+    total_pages = sum(result.total_pages for result in source_results)
 
     report_path = report_writer.write_report(workspace / args.export, report_rows)
     notification_ok = True
@@ -1715,9 +1751,20 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
     return 0 if report_rows else 2
 
 
-def run_import(args: argparse.Namespace, cfg: dict | None = None) -> int:
+def run_import(
+    args: argparse.Namespace,
+    cfg: dict | None = None,
+    *,
+    control: JobControl | None = None,
+) -> int:
     load_dotenv_if_present()
     cfg = cfg or {}
+    # Imports deliberately stay outside the collection-run lease: they process an
+    # explicit user-supplied URL list (no collection_run_id) and rely on the
+    # per-write transaction lock for isolation, while the web JobManager already
+    # prevents an import and a collection from running at once in the dashboard.
+    # They must, however, honor Pause/End like a batch (audit finding #4).
+    control = control or JobControl()
 
     workspace = Path.cwd()
     data_dir = workspace / "sample_data"
@@ -1751,6 +1798,10 @@ def run_import(args: argparse.Namespace, cfg: dict | None = None) -> int:
         )
 
         for index, url in enumerate(processed_urls, start=1):
+            control.wait_if_paused()
+            if control.is_cancelled():
+                print(safe_console_text(f"[{ts()}] URL import ended by user."))
+                break
             try:
                 source = resolve_source_for_import_url(
                     url,
