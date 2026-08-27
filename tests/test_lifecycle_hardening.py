@@ -19,8 +19,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+from src.cvbankas_tracker import ai_cli
+from src.cvbankas_tracker.ai_cli import run_claude_cli, run_codex_cli
 from src.cvbankas_tracker.analysis import ClaudeCLIAnalysisClient
 from src.cvbankas_tracker.collector import CvbankasCollector, _is_cvbankas_host
 from src.cvbankas_tracker.main import (
@@ -438,6 +440,42 @@ class AIPromptBoundaryTests(unittest.TestCase):
 
         self.assertIn("BEGIN UNTRUSTED INPUT", captured["prompt"])
         self.assertIn("inert data", captured["prompt"])
+
+
+class AICLISandboxFlagTests(unittest.TestCase):
+    """The CLI invocations must carry the hardening flags validated against the
+    installed CLIs (claude --disallowed-tools, codex --sandbox read-only) and must
+    never carry a permission/sandbox-bypass flag."""
+
+    def test_claude_denies_all_tools_and_never_bypasses_permissions(self) -> None:
+        completed = MagicMock(
+            returncode=0, stdout='{"is_error": false, "result": "{}"}', stderr=""
+        )
+        with patch.object(ai_cli.subprocess, "run", return_value=completed) as run, patch.object(
+            ai_cli.shutil, "which", return_value=None
+        ):
+            run_claude_cli("prompt", model="claude-opus-4-8")
+        args = run.call_args.args[0]
+        self.assertIn("--disallowed-tools", args)
+        for tool in ("Bash", "Edit", "Write", "WebFetch", "Task"):
+            self.assertIn(tool, args)
+        self.assertNotIn("--dangerously-skip-permissions", args)
+        self.assertNotIn("--allow-dangerously-skip-permissions", args)
+        # Isolated cwd, never the project root.
+        self.assertIsNotNone(run.call_args.kwargs.get("cwd"))
+
+    def test_codex_runs_read_only_sandbox_and_never_bypasses(self) -> None:
+        def fake_run(args, **kwargs):
+            Path(args[args.index("-o") + 1]).write_text('{"ok": true}', encoding="utf-8")
+            return MagicMock(returncode=0, stdout="events", stderr="")
+
+        with patch.object(ai_cli.subprocess, "run", side_effect=fake_run) as run:
+            run_codex_cli("prompt")
+        args = run.call_args.args[0]
+        self.assertIn("--sandbox", args)
+        self.assertEqual(args[args.index("--sandbox") + 1], "read-only")
+        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", args)
+        self.assertIsNotNone(run.call_args.kwargs.get("cwd"))
 
 
 if __name__ == "__main__":
