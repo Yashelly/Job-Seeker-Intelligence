@@ -1582,7 +1582,16 @@ def _send_telegram_batch_summary(
             notify_when_empty=notify_when_empty,
         )
     except TelegramNotificationError as error:
-        print(safe_console_text(f"[{ts()}] TELEGRAM ERROR | {error}"))
+        sent = getattr(error, "sent_count", None)
+        if sent:
+            total = getattr(error, "total_chunks", None) or "?"
+            print(
+                safe_console_text(
+                    f"[{ts()}] TELEGRAM PARTIAL DELIVERY | {sent}/{total} chunks sent | {error}"
+                )
+            )
+        else:
+            print(safe_console_text(f"[{ts()}] TELEGRAM ERROR | {error}"))
         return False
 
     if sent_count:

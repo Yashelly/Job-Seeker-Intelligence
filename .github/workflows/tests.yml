@@ -9,8 +9,12 @@ permissions:
 
 jobs:
   unit-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - name: Check out repository
@@ -41,3 +45,27 @@ jobs:
           OPENAI_API_KEY: ""
           AI_BACKEND: ""
         run: python main.py --demo
+
+      # Windows is the primary deployment target and ships PowerShell launchers;
+      # parse them on a real Windows runner so a syntax drift is caught in CI
+      # instead of at the next scheduled daily run.
+      - name: PowerShell launcher syntax check
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Path scripts -Filter *.ps1 -Recurse | ForEach-Object {
+            $tokens = $null
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$tokens, [ref]$parseErrors)
+            if ($parseErrors -and $parseErrors.Count -gt 0) {
+              Write-Host "::error::Parse errors in $($_.FullName)"
+              $parseErrors | ForEach-Object { Write-Host "  $($_.Message)" }
+              $failed = $true
+            }
+            else {
+              Write-Host "OK: $($_.Name)"
+            }
+          }
+          if ($failed) { exit 1 }

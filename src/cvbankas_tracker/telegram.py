@@ -3,6 +3,8 @@ from __future__ import annotations
 import html
 import json
 import os
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -13,10 +15,31 @@ from .models import ApplicationRecord, Vacancy, VacancyAnalysis
 
 TELEGRAM_MESSAGE_LIMIT = 4096
 DEFAULT_CHUNK_LIMIT = 3800
+# Transient Telegram failures (rate limits, 5xx, network blips) are retried with
+# exponential backoff so a single hiccup does not drop the daily summary.
+DEFAULT_MAX_ATTEMPTS = 4
+DEFAULT_BACKOFF_BASE_SECONDS = 1.0
+BACKOFF_CAP_SECONDS = 30.0
 
 
 class TelegramNotificationError(RuntimeError):
-    """Raised when Telegram configuration or delivery fails."""
+    """Raised when Telegram configuration or delivery fails.
+
+    ``sent_count``/``total_chunks`` are populated when a multi-chunk message was
+    *partially* delivered (some chunks reached Telegram before a later one
+    failed), so the caller can record that partial state instead of treating the
+    whole summary as unsent.
+    """
+
+    def __init__(
+        self,
+        *args: object,
+        sent_count: int | None = None,
+        total_chunks: int | None = None,
+    ) -> None:
+        super().__init__(*args)
+        self.sent_count = sent_count
+        self.total_chunks = total_chunks
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,14 +55,24 @@ class TelegramNotifier:
         chat_id: str,
         *,
         api_base: str = "https://api.telegram.org",
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        backoff_base: float = DEFAULT_BACKOFF_BASE_SECONDS,
+        sleep_func: Callable[[float], None] = time.sleep,
     ) -> None:
         self._bot_token = bot_token.strip()
         self._chat_id = chat_id.strip()
         self._api_base = api_base.rstrip("/")
+        # Injectable so retry/backoff can be exercised without real delays.
+        self._max_attempts = max(1, int(max_attempts))
+        self._backoff_base = max(0.0, float(backoff_base))
+        self._sleep = sleep_func
         if not self._bot_token:
             raise TelegramNotificationError("TELEGRAM_BOT_TOKEN is not configured.")
         if not self._chat_id:
             raise TelegramNotificationError("TELEGRAM_CHAT_ID is not configured.")
+
+    def _backoff_delay(self, attempt: int) -> float:
+        return min(BACKOFF_CAP_SECONDS, self._backoff_base * (2 ** (attempt - 1)))
 
     @classmethod
     def from_env(cls) -> TelegramNotifier:
@@ -50,15 +83,27 @@ class TelegramNotifier:
 
     def send_text(self, text: str) -> int:
         chunks = split_telegram_text(text)
-        for chunk in chunks:
-            self._call_api(
-                "sendMessage",
-                {
-                    "chat_id": self._chat_id,
-                    "text": chunk,
-                    "parse_mode": "HTML",
-                },
-            )
+        for index, chunk in enumerate(chunks):
+            try:
+                self._call_api(
+                    "sendMessage",
+                    {
+                        "chat_id": self._chat_id,
+                        "text": chunk,
+                        "parse_mode": "HTML",
+                    },
+                )
+            except TelegramNotificationError as error:
+                if index == 0:
+                    raise  # nothing was delivered; surface the plain error
+                # Some chunks already reached Telegram: report the partial state
+                # so the caller can log it rather than treating it as unsent.
+                raise TelegramNotificationError(
+                    f"Partial Telegram delivery: {index}/{len(chunks)} chunk(s) sent "
+                    f"before failure: {error}",
+                    sent_count=index,
+                    total_chunks=len(chunks),
+                ) from error
         return len(chunks)
 
     def send_daily_summary(
@@ -91,23 +136,48 @@ class TelegramNotifier:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        try:
-            with urlopen(request, timeout=30) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except HTTPError as error:
-            detail = _telegram_error_detail(error)
-            raise TelegramNotificationError(
-                f"Telegram API rejected {method}: {detail}"
-            ) from error
-        except (URLError, TimeoutError, json.JSONDecodeError) as error:
-            raise TelegramNotificationError(
-                f"Telegram API request failed during {method}: {type(error).__name__}"
-            ) from error
+        last_error: TelegramNotificationError | None = None
+        for attempt in range(1, self._max_attempts + 1):
+            try:
+                with urlopen(request, timeout=30) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+            except HTTPError as error:
+                detail = _telegram_error_detail(error)
+                # 429 (rate limit) and 5xx are transient -> back off and retry;
+                # other 4xx (bad request, bad token/chat) are permanent.
+                if error.code == 429 or error.code >= 500:
+                    last_error = TelegramNotificationError(
+                        f"Telegram API rejected {method}: {detail}"
+                    )
+                    if attempt < self._max_attempts:
+                        self._sleep(_retry_after_seconds(error) or self._backoff_delay(attempt))
+                        continue
+                    raise last_error from error
+                raise TelegramNotificationError(
+                    f"Telegram API rejected {method}: {detail}"
+                ) from error
+            except (URLError, TimeoutError, json.JSONDecodeError) as error:
+                last_error = TelegramNotificationError(
+                    f"Telegram API request failed during {method}: {type(error).__name__}"
+                )
+                if attempt < self._max_attempts:
+                    self._sleep(self._backoff_delay(attempt))
+                    continue
+                raise last_error from error
 
-        if not data.get("ok"):
-            description = str(data.get("description") or "unknown Telegram error")
-            raise TelegramNotificationError(description)
-        return data
+            if not data.get("ok"):
+                description = str(data.get("description") or "unknown Telegram error")
+                retry_after = _ok_false_retry_after(data)
+                if retry_after is not None and attempt < self._max_attempts:
+                    last_error = TelegramNotificationError(description)
+                    self._sleep(retry_after)
+                    continue
+                raise TelegramNotificationError(description)
+            return data
+
+        raise last_error or TelegramNotificationError(
+            f"Telegram {method} failed after {self._max_attempts} attempts."
+        )
 
 
 def discover_telegram_chats(bot_token: str) -> list[TelegramChat]:
@@ -249,6 +319,38 @@ def _chat_label(chat: dict[str, Any]) -> str:
         if part
     )
     return title or (f"@{username}" if username else full_name) or str(chat.get("type", "chat"))
+
+
+def _retry_after_seconds(error: HTTPError) -> float | None:
+    """Honor Telegram's ``Retry-After`` header on a 429, if present and sane."""
+    try:
+        raw = error.headers.get("Retry-After") if error.headers else None
+    except AttributeError:
+        raw = None
+    if raw is None:
+        return None
+    try:
+        seconds = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if seconds < 0:
+        return None
+    return min(seconds, BACKOFF_CAP_SECONDS)
+
+
+def _ok_false_retry_after(data: dict[str, Any]) -> float | None:
+    """Extract ``parameters.retry_after`` from an ``ok:false`` rate-limit body."""
+    parameters = data.get("parameters")
+    if not isinstance(parameters, dict):
+        return None
+    raw = parameters.get("retry_after")
+    try:
+        seconds = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if seconds < 0:
+        return None
+    return min(seconds, BACKOFF_CAP_SECONDS)
 
 
 def _telegram_error_detail(error: HTTPError) -> str:
