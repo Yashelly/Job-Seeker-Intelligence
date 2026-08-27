@@ -64,3 +64,7 @@ _tmp_*/
 
 # Runtime artifact from CV profile builder
 profile_from_cv.json
+
+# Coverage data (local + CI)
+.coverage
+htmlcov/

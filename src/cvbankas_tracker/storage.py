@@ -1021,6 +1021,20 @@ class DatabaseManager:
         run_id = self.get_latest_inbox_run_id()
         return self.get_collection_run(run_id) if run_id is not None else None
 
+    def list_collection_runs(self, *, limit: int = 50) -> list[CollectionRun]:
+        """Return the most recent collection runs, newest first (for the run timeline)."""
+        capped = max(1, min(int(limit), 500))
+        with self.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM collection_runs
+                ORDER BY started_at DESC, id DESC
+                LIMIT ?
+                """,
+                (capped,),
+            ).fetchall()
+        return [_collection_run_from_row(row) for row in rows]
+
     def record_vacancy_observation(
         self,
         source_url: str,
