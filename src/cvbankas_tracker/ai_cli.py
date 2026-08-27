@@ -9,6 +9,25 @@ from pathlib import Path
 
 DEFAULT_CLI_TIMEOUT = 240
 
+# Vacancy analysis / extraction is pure text scoring and needs no tools, so the
+# Claude CLI is invoked with every action/network/subagent tool denied. A
+# prompt-injection payload smuggled in vacancy text therefore cannot make the
+# agent read or write files, reach the network, or spawn subagents, even if the
+# user's config would otherwise permit them (audit finding #2). Read-style tools
+# are denied too so an absolute-path read cannot escape the isolated cwd.
+CLAUDE_DISALLOWED_TOOLS = (
+    "Bash",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Read",
+    "Grep",
+    "Glob",
+    "WebFetch",
+    "WebSearch",
+    "Task",
+)
+
 
 def _resolve_command(command: str) -> str:
     """Return an executable path for ``command``.
@@ -117,6 +136,8 @@ def run_claude_cli(
     args = [_resolve_command(command), "-p", prompt, "--output-format", "json"]
     if model:
         args += ["--model", model]
+    # Deny all tools (variadic flag kept last so it consumes only the tool names).
+    args += ["--disallowed-tools", *CLAUDE_DISALLOWED_TOOLS]
 
     # Run in a throwaway working directory, never the project root: vacancy text
     # is untrusted, and an agentic CLI's relative file operations must not be able
@@ -167,7 +188,20 @@ def run_codex_cli(
     """
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
         out_path = Path(tmp_dir) / "codex_last_message.txt"
-        args = [_resolve_command(command), "exec", "--skip-git-repo-check", "-o", str(out_path)]
+        # ``--sandbox read-only`` runs any model-generated shell command under a
+        # read-only sandbox, so untrusted vacancy text cannot drive Codex into
+        # writing files or mutating the machine (audit finding #2). The ``-o``
+        # final-message file is written by the Codex runtime itself, outside that
+        # sandbox, so read-only does not break output capture.
+        args = [
+            _resolve_command(command),
+            "exec",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "-o",
+            str(out_path),
+        ]
         if model:
             args += ["-m", model]
         args.append(prompt)
