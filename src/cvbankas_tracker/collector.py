@@ -6,6 +6,18 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import urlopen
 
 
+def _is_cvbankas_host(url: str) -> bool:
+    """True only when ``url``'s host is cvbankas.lt or a real subdomain of it.
+
+    A substring test (``"cvbankas.lt" in url``) is unsafe: a hostile listing page
+    could smuggle an absolute link like ``https://cvbankas.lt.evil.example/1-9``
+    that passes it and then gets fetched/analyzed (audit finding #8). Parsing the
+    host and matching exact/subdomain closes that hole.
+    """
+    host = (urlparse(url).hostname or "").lower()
+    return host == "cvbankas.lt" or host.endswith(".cvbankas.lt")
+
+
 class CvbankasCollector:
     _REMOTE_LISTING_PATH = "/darbas-darbas-namuose"
     _LISTING_LINK_PATTERN = re.compile(
@@ -44,7 +56,7 @@ class CvbankasCollector:
 
         for match in matches:
             candidate = urljoin("https://www.cvbankas.lt/", match.group("url").strip())
-            if "cvbankas.lt" not in candidate:
+            if not _is_cvbankas_host(candidate):
                 continue
             if not re.search(r"/1-\d+", candidate):
                 continue

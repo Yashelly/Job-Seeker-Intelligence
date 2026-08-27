@@ -118,14 +118,20 @@ def run_claude_cli(
     if model:
         args += ["--model", model]
 
+    # Run in a throwaway working directory, never the project root: vacancy text
+    # is untrusted, and an agentic CLI's relative file operations must not be able
+    # to touch the app's own files (audit finding #2). Auth lives in the user's
+    # home/env, so an isolated cwd does not disturb subscription login.
     try:
-        completed = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            encoding="utf-8",
-        )
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_cwd:
+            completed = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                encoding="utf-8",
+                cwd=tmp_cwd,
+            )
     except FileNotFoundError as exc:
         raise AICLIError(f"Claude CLI '{command}' was not found on PATH.") from exc
     except subprocess.TimeoutExpired as exc:
@@ -159,7 +165,7 @@ def run_codex_cli(
 
     Uses ``codex exec -o <file> ...`` so the final assistant message is written cleanly to a file.
     """
-    with tempfile.TemporaryDirectory() as tmp_dir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
         out_path = Path(tmp_dir) / "codex_last_message.txt"
         args = [_resolve_command(command), "exec", "--skip-git-repo-check", "-o", str(out_path)]
         if model:
@@ -167,12 +173,16 @@ def run_codex_cli(
         args.append(prompt)
 
         try:
+            # Isolate the working directory from the project root: untrusted
+            # vacancy text must not steer an agentic CLI into the app's files
+            # (audit finding #2).
             completed = subprocess.run(
                 args,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 encoding="utf-8",
+                cwd=tmp_dir,
             )
         except FileNotFoundError as exc:
             raise AICLIError(f"Codex CLI '{command}' was not found on PATH.") from exc

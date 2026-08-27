@@ -318,6 +318,59 @@ def _raise_unless_foreign_keys_clean(connection: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_collection_run_status_check(connection: sqlite3.Connection) -> None:
+    """Widen ``collection_runs.status`` CHECK to admit the ``cancelled`` terminal state.
+
+    ``CREATE TABLE IF NOT EXISTS`` never alters an existing table, so databases
+    created before ``cancelled`` was introduced keep the old
+    ``CHECK(status IN ('running','completed','partial','failed'))`` constraint and
+    would reject a cancelled run. SQLite cannot ALTER a CHECK, so the table is
+    rebuilt in place preserving row ids (keeping the leases/observations foreign
+    keys valid). Fresh databases already carry the wide CHECK and skip this.
+    """
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'collection_runs'"
+    ).fetchone()
+    table_sql = (row[0] if row else "") or ""
+    if not table_sql or "cancelled" in table_sql:
+        return
+
+    # Foreign-key enforcement must be toggled outside a transaction; the table
+    # rebuild itself runs inside one so a crash mid-migration rolls back cleanly.
+    connection.execute("PRAGMA foreign_keys=OFF")
+    try:
+        connection.execute("BEGIN")
+        connection.execute(
+            """
+            CREATE TABLE collection_runs_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                db_path TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                status TEXT NOT NULL CHECK(status IN ('running', 'completed', 'partial', 'failed', 'cancelled')),
+                source_summary_json TEXT NOT NULL DEFAULT '{}',
+                error_summary_json TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO collection_runs_new
+                (id, db_path, started_at, finished_at, status, source_summary_json, error_summary_json)
+            SELECT id, db_path, started_at, finished_at, status, source_summary_json, error_summary_json
+            FROM collection_runs
+            """
+        )
+        connection.execute("DROP TABLE collection_runs")
+        connection.execute("ALTER TABLE collection_runs_new RENAME TO collection_runs")
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+
 def _migrate_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
@@ -344,7 +397,7 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
             db_path TEXT NOT NULL,
             started_at TEXT NOT NULL,
             finished_at TEXT,
-            status TEXT NOT NULL CHECK(status IN ('running', 'completed', 'partial', 'failed')),
+            status TEXT NOT NULL CHECK(status IN ('running', 'completed', 'partial', 'failed', 'cancelled')),
             source_summary_json TEXT NOT NULL DEFAULT '{}',
             error_summary_json TEXT NOT NULL DEFAULT '{}'
         );
@@ -430,6 +483,7 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
         );
         """
     )
+    _migrate_collection_run_status_check(connection)
     _ensure_column(connection, "vacancies", "raw_text", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "vacancies", "source_name", "TEXT NOT NULL DEFAULT 'cvbankas'")
     _ensure_column(connection, "vacancies", "last_seen_run_id", "INTEGER")
@@ -867,11 +921,11 @@ class DatabaseManager:
         self,
         run_id: int,
         *,
-        status: Literal["completed", "partial", "failed"],
+        status: Literal["completed", "partial", "failed", "cancelled"],
         source_summary: dict[str, object] | None = None,
         error_summary: dict[str, object] | None = None,
     ) -> CollectionRun:
-        if status not in {"completed", "partial", "failed"}:
+        if status not in {"completed", "partial", "failed", "cancelled"}:
             raise ValueError(f"Invalid terminal collection run status: {status}")
         with self.transaction() as connection:
             connection.execute(
@@ -895,6 +949,56 @@ class DatabaseManager:
         run = self.get_collection_run(run_id)
         assert run is not None
         return run
+
+    def recover_stranded_collection_runs(
+        self, *, older_than_seconds: float | None = None
+    ) -> int:
+        """Reap ``running`` collection runs left behind by a crash or hard kill.
+
+        A run that acquired the single-writer lease but never reached
+        ``finish_collection_run`` (unhandled exception, process kill, power loss)
+        stays ``running`` forever and blocks every future ``begin_collection_run``.
+        This marks such runs ``failed``, releases their lease, and returns how many
+        were reaped. ``older_than_seconds`` restricts reaping to runs whose
+        ``started_at`` is at least that old, so an in-process caller can recover a
+        genuinely stale lease without clobbering a legitimately active run.
+        """
+        now = utc_now_iso()
+        with self.transaction() as connection:
+            rows = connection.execute(
+                "SELECT id, started_at FROM collection_runs WHERE status = 'running'"
+            ).fetchall()
+            stale_ids: list[int] = []
+            for row in rows:
+                if older_than_seconds is not None:
+                    try:
+                        started = datetime.fromisoformat(
+                            str(row["started_at"]).replace("Z", "+00:00")
+                        )
+                        if started.tzinfo is None:
+                            started = started.replace(tzinfo=UTC)
+                        age = (datetime.now(UTC) - started).total_seconds()
+                    except (TypeError, ValueError):
+                        age = None  # unparseable timestamp -> treat as stale, reap it
+                    if age is not None and age < older_than_seconds:
+                        continue
+                stale_ids.append(int(row["id"]))
+            if not stale_ids:
+                return 0
+            placeholders = ",".join("?" for _ in stale_ids)
+            connection.execute(
+                f"""
+                UPDATE collection_runs
+                SET status = 'failed', finished_at = ?, error_summary_json = ?
+                WHERE id IN ({placeholders})
+                """,
+                (now, json.dumps({"recovery": "stranded 'running' run reaped"}), *stale_ids),
+            )
+            connection.execute(
+                f"DELETE FROM collection_run_leases WHERE run_id IN ({placeholders})",
+                stale_ids,
+            )
+            return len(stale_ids)
 
     def get_collection_run(self, run_id: int) -> CollectionRun | None:
         with self.connection() as connection:
