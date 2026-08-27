@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from secrets import token_urlsafe
 from typing import Any
@@ -131,6 +132,50 @@ def _asset_version() -> str:
         return str(int((_STATIC_DIR / "dashboard.css").stat().st_mtime))
     except OSError:
         return "1"
+
+
+def _run_duration(started_at: str | None, finished_at: str | None) -> str:
+    """Human-readable elapsed time between two ISO instants, or '' if unfinished."""
+    if not started_at or not finished_at:
+        return ""
+    try:
+        start = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+        finish = datetime.fromisoformat(str(finished_at).replace("Z", "+00:00"))
+        seconds = max(0, int((finish - start).total_seconds()))
+    except (TypeError, ValueError):
+        return ""
+    minutes, secs = divmod(seconds, 60)
+    return f"{minutes}m {secs}s" if minutes else f"{secs}s"
+
+
+def _run_view(run: Any) -> dict[str, Any]:
+    """Shape a CollectionRun into a template-friendly dict with per-source + total counts."""
+    summary = run.source_summary if isinstance(run.source_summary, dict) else {}
+    keys = ("attempted", "failed", "observed", "saved", "pages")
+    totals = dict.fromkeys(keys, 0)
+    sources: list[dict[str, Any]] = []
+    for name, data in sorted(summary.items()):
+        data = data if isinstance(data, dict) else {}
+        row: dict[str, Any] = {"name": name}
+        for key in keys:
+            try:
+                value = int(data.get(key, 0) or 0)
+            except (TypeError, ValueError):
+                value = 0
+            row[key] = value
+            totals[key] += value
+        sources.append(row)
+    errors = run.error_summary if isinstance(run.error_summary, dict) else {}
+    return {
+        "id": run.id,
+        "status": run.status,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at or "",
+        "duration": _run_duration(run.started_at, run.finished_at),
+        "sources": sources,
+        "totals": totals,
+        "errors": errors,
+    }
 
 
 def _render(templates: Jinja2Templates, request: Request, name: str, **values: Any):
@@ -776,6 +821,18 @@ def create_app(
     @app.post("/jobs/{job_id}/cancel")
     def job_cancel(request: Request, job_id: int, _f: dict[str, str] = Depends(require_safe_post)):
         return _job_control(request, job_id, "cancel")
+
+    @app.get("/runs")
+    def runs_page(request: Request):
+        database = DatabaseManager(request.app.state.db_path)
+        runs = [_run_view(run) for run in database.list_collection_runs(limit=50)]
+        return _render(
+            templates,
+            request,
+            "runs.html",
+            page_title="Runs",
+            runs=runs,
+        )
 
     @app.get("/schedule")
     def schedule_page(request: Request):

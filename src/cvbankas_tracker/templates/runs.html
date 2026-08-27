@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Collection run history</h2>
+  <p class="muted">Every scheduled, manual, or imported collection run recorded in this database, newest first. Cancelled and failed runs are kept so an aborted or crashed run is visible rather than silently lost.</p>
+
+  {% if not runs %}
+  <p class="muted">No collection runs yet. Start one from <a href="/search">Search</a> or <a href="/schedule">Schedule</a>.</p>
+  {% else %}
+  <div class="runs-timeline">
+    {% for run in runs %}
+    <article class="run-row run-{{ run.status }}">
+      <div class="run-head">
+        <span class="run-status run-status-{{ run.status }}">{{ run.status }}</span>
+        <span class="run-id">run #{{ run.id }}</span>
+        <span class="muted">{{ run.started_at }}{% if run.duration %} · {{ run.duration }}{% endif %}</span>
+      </div>
+
+      {% if run.sources %}
+      <table class="run-sources">
+        <thead>
+          <tr><th>Source</th><th>Attempted</th><th>Saved</th><th>Observed</th><th>Failed</th><th>Pages</th></tr>
+        </thead>
+        <tbody>
+          {% for source in run.sources %}
+          <tr>
+            <td>{{ source.name }}</td>
+            <td>{{ source.attempted }}</td>
+            <td>{{ source.saved }}</td>
+            <td>{{ source.observed }}</td>
+            <td{% if source.failed %} class="run-failed"{% endif %}>{{ source.failed }}</td>
+            <td>{{ source.pages }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>Total</td>
+            <td>{{ run.totals.attempted }}</td>
+            <td>{{ run.totals.saved }}</td>
+            <td>{{ run.totals.observed }}</td>
+            <td{% if run.totals.failed %} class="run-failed"{% endif %}>{{ run.totals.failed }}</td>
+            <td>{{ run.totals.pages }}</td>
+          </tr>
+        </tfoot>
+      </table>
+      {% else %}
+      <p class="muted">No per-source detail recorded for this run.</p>
+      {% endif %}
+
+      {% if run.errors %}
+      <p class="error run-errors">
+        Errors:
+        {% for name, detail in run.errors.items() %}<span>{{ name }}: {{ detail }}</span>{% if not loop.last %}; {% endif %}{% endfor %}
+      </p>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

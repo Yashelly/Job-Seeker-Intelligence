@@ -175,6 +175,11 @@ def parse_args() -> argparse.Namespace:
         help="Path to the generated Markdown report.",
     )
     parser.add_argument(
+        "--recover",
+        action="store_true",
+        help="Reap collection runs left 'running' by a crash, release their lease, then exit.",
+    )
+    parser.add_argument(
         "--keyword",
         default="python",
         help="Keyword used for vacancy search across enabled sources.",
@@ -1751,6 +1756,24 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
     return 0 if report_rows else 2
 
 
+def run_recover_command(args: argparse.Namespace) -> int:
+    """Reap collection runs stranded in 'running' by a crash and report the count.
+
+    Mirrors the automatic recovery the dashboard runs at startup, exposed as an
+    explicit admin command for a CLI-only operator whose batch is blocked by a
+    stale lease.
+    """
+    workspace = Path.cwd()
+    database = DatabaseManager(workspace / args.db)
+    database.initialize()
+    reaped = database.recover_stranded_collection_runs()
+    if reaped:
+        print(safe_console_text(f"[{ts()}] Recovered {reaped} stranded collection run(s)."))
+    else:
+        print(safe_console_text(f"[{ts()}] No stranded collection runs to recover."))
+    return 0
+
+
 def run_import(
     args: argparse.Namespace,
     cfg: dict | None = None,
@@ -1961,6 +1984,8 @@ def main() -> int:
         )
     )
     print(safe_console_text(f"Using database: {args.db}"))
+    if getattr(args, "recover", False):
+        return run_recover_command(args)
     if not _cli_option_present("--export"):
         args.export = _cfg_get(cfg, "export", default=args.export)
     args.search_keywords = resolve_search_keywords(args, cfg)

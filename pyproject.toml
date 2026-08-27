@@ -32,8 +32,8 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# Pinned so the lint gate is byte-reproducible across machines and CI.
-dev = ["ruff==0.16.3"]
+# Pinned so the lint and coverage gates are byte-reproducible across machines and CI.
+dev = ["ruff==0.16.3", "coverage==7.6.9"]
 
 [project.scripts]
 job-seeker = "cvbankas_tracker.main:main"
