@@ -7,6 +7,8 @@ from contextlib import redirect_stdout
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from itertools import count
+from pathlib import Path
+from typing import TextIO
 
 # A long collection run streams a lot of stdout. Cap the retained log so a
 # single job cannot grow unbounded in memory, keeping the most recent output.
@@ -15,6 +17,10 @@ _TRUNCATION_NOTICE = "…[earlier output truncated]…\n"
 # Completed jobs live only in memory (a local single-user dashboard); keep a
 # short history so restarting search/import repeatedly cannot leak memory.
 MAX_COMPLETED_JOBS = 20
+# When a log directory is configured, each job's full stdout is also written to
+# its own file so a diagnosis survives a dashboard restart (audit finding #9).
+# Old files are pruned so the directory cannot grow without bound.
+MAX_LOG_FILES = 50
 
 
 class JobConflictError(RuntimeError):
@@ -73,6 +79,7 @@ class Job:
     started_at: str = field(default_factory=_now_iso)
     finished_at: str = ""
     control: JobControl = field(default_factory=JobControl)
+    log_path: str = ""  # on-disk durable log for this job, "" when file logging is off
 
 
 class _LogBuffer(io.StringIO):
@@ -83,10 +90,11 @@ class _LogBuffer(io.StringIO):
     (the part a user actually watches) always survives.
     """
 
-    def __init__(self, job: Job, lock: threading.Lock) -> None:
+    def __init__(self, job: Job, lock: threading.Lock, log_file: TextIO | None = None) -> None:
         super().__init__()
         self._job = job
         self._lock = lock
+        self._log_file = log_file
 
     def write(self, value: str) -> int:
         with self._lock:
@@ -95,16 +103,25 @@ class _LogBuffer(io.StringIO):
                 keep = MAX_LOG_CHARS - len(_TRUNCATION_NOTICE)
                 log = _TRUNCATION_NOTICE + log[-keep:]
             self._job.log = log
+            # The on-disk file keeps the *full* log (no in-memory truncation) so a
+            # long run remains fully diagnosable after a restart.
+            if self._log_file is not None:
+                try:
+                    self._log_file.write(value)
+                    self._log_file.flush()
+                except OSError:
+                    pass
         return len(value)
 
 
 class JobManager:
     """Runs one background job at a time, capturing its stdout into a bounded log."""
 
-    def __init__(self) -> None:
+    def __init__(self, log_dir: Path | str | None = None) -> None:
         self._jobs: dict[int, Job] = {}
         self._ids = count(1)
         self._lock = threading.Lock()
+        self._log_dir = Path(log_dir) if log_dir is not None else None
 
     def _has_running(self) -> bool:
         return any(job.status in {"running", "paused"} for job in self._jobs.values())
@@ -117,12 +134,36 @@ class JobManager:
         for job in completed[: max(0, len(completed) - MAX_COMPLETED_JOBS)]:
             self._jobs.pop(job.id, None)
 
+    def _prune_log_files(self) -> None:
+        """Keep only the newest ``MAX_LOG_FILES`` job logs so disk cannot grow forever."""
+        if self._log_dir is None:
+            return
+        try:
+            files = sorted(
+                self._log_dir.glob("job-*.log"),
+                key=lambda p: p.stat().st_mtime,
+            )
+        except OSError:
+            return
+        for path in files[: max(0, len(files) - MAX_LOG_FILES)]:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
     def start(self, kind: str, target: Callable[[JobControl], int]) -> Job:
         with self._lock:
             if self._has_running():
                 raise JobConflictError("Another job is still running. Wait for it to finish.")
             self._prune_locked()
             job = Job(id=next(self._ids), kind=kind)
+            if self._log_dir is not None:
+                try:
+                    self._log_dir.mkdir(parents=True, exist_ok=True)
+                    job.log_path = str(self._log_dir / f"job-{job.id}-{kind}.log")
+                    self._prune_log_files()
+                except OSError:
+                    job.log_path = ""
             self._jobs[job.id] = job
 
         thread = threading.Thread(target=self._run, args=(job, target), daemon=True)
@@ -130,7 +171,13 @@ class JobManager:
         return job
 
     def _run(self, job: Job, target: Callable[[JobControl], int]) -> None:
-        buffer = _LogBuffer(job, self._lock)
+        log_file: TextIO | None = None
+        if job.log_path:
+            try:
+                log_file = open(job.log_path, "a", encoding="utf-8")
+            except OSError:
+                log_file = None
+        buffer = _LogBuffer(job, self._lock, log_file)
         try:
             with redirect_stdout(buffer):
                 exit_code = target(job.control)
@@ -145,6 +192,18 @@ class JobManager:
                 job.exit_code = 1
                 job.status = "error"
                 job.finished_at = _now_iso()
+                if log_file is not None:
+                    try:
+                        log_file.write(f"\nERROR | {error}\n")
+                    except OSError:
+                        pass
+        finally:
+            if log_file is not None:
+                try:
+                    log_file.flush()
+                    log_file.close()
+                except OSError:
+                    pass
 
     def pause(self, job_id: int) -> bool:
         with self._lock:
@@ -192,4 +251,5 @@ class JobManager:
                 "error": job.error,
                 "started_at": job.started_at,
                 "finished_at": job.finished_at,
+                "log_path": job.log_path,
             }

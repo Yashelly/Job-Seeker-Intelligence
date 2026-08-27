@@ -428,7 +428,7 @@ def create_app(
                 app.state.profile_path = stored
         except Exception:
             pass
-    app.state.jobs = JobManager()
+    app.state.jobs = JobManager(log_dir=resolved_db_path.parent / "job_logs")
     app.state.scheduler = DailyScheduler(
         resolved_db_path.parent / "scheduler.json",
         lambda schedule: _start_daily_job(app, schedule),

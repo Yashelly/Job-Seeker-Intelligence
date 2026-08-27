@@ -131,8 +131,15 @@ function Write-ResourceSample {
         else {
             0
         }
-        $databasePath = Join-Path $projectRoot "job_seeker.db"
-        $databaseMb = if (Test-Path -LiteralPath $databasePath) {
+        # The daily run resolves its database from config (default
+        # config/job_seeker.db) or the project root; probe both so the size
+        # metric reports the file actually in use instead of always 0.
+        $databaseCandidates = @(
+            (Join-Path $projectRoot "config/job_seeker.db"),
+            (Join-Path $projectRoot "job_seeker.db")
+        )
+        $databasePath = $databaseCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        $databaseMb = if ($databasePath) {
             (Get-Item -LiteralPath $databasePath).Length / 1MB
         }
         else {

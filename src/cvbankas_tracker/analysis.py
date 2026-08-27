@@ -337,6 +337,10 @@ class VacancyAnalysisBuilder:
         self._notes = notes.strip()
         return self
 
+    def current_notes(self) -> str:
+        """Return the notes accumulated so far (used to prepend a fallback reason)."""
+        return self._notes
+
     def build(self) -> VacancyAnalysis:
         missing_fields: list[str] = []
         if not self._vacancy_source_url:
@@ -822,9 +826,18 @@ class VacancyAnalysisService:
             # an empty explanation) and only fail at build time. That must fall
             # back to the deterministic strategy too, not surface to the caller.
             return builder.build()
-        except Exception:
+        except Exception as error:
             if self.fallback_strategy is None:
                 raise
+            # Record *why* the primary provider failed instead of silently
+            # substituting a rule-based score (audit finding #7). The reason is
+            # persisted in the analysis notes (durable, per-vacancy, visible in
+            # the UI) and echoed once to stdout so it also lands in the job log.
+            reason = f"{type(error).__name__}: {error}".strip()[:200]
+            print(f"[AI fallback] primary analysis provider failed -> rule-based | {reason}")
             builder.reset()
             self.fallback_strategy.populate_builder(builder, vacancy, profile)
+            marker = f"[AI fallback] primary provider failed: {reason}"
+            existing = builder.current_notes()
+            builder.with_notes(f"{marker} | {existing}" if existing else marker)
             return builder.build()
