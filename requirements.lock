@@ -9,7 +9,7 @@
 # reproducible across platforms while pip selects the correct wheel.
 # Regenerate after changing dependencies in pyproject.toml.
 #
-# Resolved 35 packages on 2026-08-27.
+# Resolved 36 packages on 2026-08-27.
 
 annotated-types==0.8.0
 anyio==4.14.2
@@ -45,4 +45,5 @@ starlette==0.47.3
 tqdm==4.70.0
 typing-inspection==0.4.4
 typing_extensions==4.16.0
+tzdata==2025.2
 uvicorn==0.52.1

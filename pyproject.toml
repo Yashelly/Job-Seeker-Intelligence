@@ -16,6 +16,10 @@ dependencies = [
     "pypdf==6.16.0",
     "python-docx==1.2.0",
     "python-multipart==0.0.32",
+    # zoneinfo has no IANA tz database on Windows (the primary deployment
+    # target); tzdata provides it so ZoneInfo("Europe/Vilnius") works on a clean
+    # Windows install instead of raising ZoneInfoNotFoundError.
+    "tzdata==2025.2",
 ]
 keywords = [
     "job-search",
