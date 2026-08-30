@@ -1880,6 +1880,7 @@ class DatabaseManager:
                     app.notes,
                     a.score AS latest_score,
                     a.fit_label AS latest_fit_label,
+                    a.analysis_method,
                     (
                         SELECT MIN(event.changed_at)
                         FROM application_status_events event
@@ -1913,6 +1914,7 @@ class DatabaseManager:
                 status=ApplicationStatus(row["status"]),
                 latest_score=row["latest_score"],
                 latest_fit_label=row["latest_fit_label"],
+                analysis_method=row["analysis_method"],
                 saved_at_utc=row["saved_at_utc"],
                 notes=row["notes"],
             )

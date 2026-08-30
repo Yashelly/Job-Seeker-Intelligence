@@ -238,6 +238,7 @@ class TrackedApplicationItem:
     status: ApplicationStatus
     latest_score: int | None
     latest_fit_label: str | None
+    analysis_method: str | None
     saved_at_utc: str | None
     notes: str
 

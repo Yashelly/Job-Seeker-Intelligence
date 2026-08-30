@@ -558,12 +558,27 @@ def create_app(
     @app.get("/applications")
     def applications(request: Request):
         database = _db(request)
+        all_applications = database.list_tracked_applications()
+        source_choices = sorted({item.source_name for item in all_applications})
+        selected_sources = [
+            source
+            for source in request.query_params.getlist("source")
+            if source in source_choices
+        ]
+        visible_applications = (
+            [item for item in all_applications if item.source_name in selected_sources]
+            if selected_sources
+            else all_applications
+        )
         return _render(
             templates,
             request,
             "applications.html",
             page_title="Saved",
-            applications=database.list_tracked_applications(),
+            applications=visible_applications,
+            application_count=len(all_applications),
+            source_choices=source_choices,
+            selected_sources=selected_sources,
             statuses=list(ApplicationStatus),
             actions=database.list_action_items(),
             vacancies=database.list_vacancies_with_latest_scores(),

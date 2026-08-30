@@ -400,6 +400,7 @@ class AutoSaveAndPruneTests(unittest.TestCase):
             tracked = db.list_tracked_applications()
 
             self.assertEqual([item.latest_score for item in tracked], [90, 25])
+            self.assertTrue(all(item.analysis_method == "rule_based" for item in tracked))
             self.assertTrue(all(item.saved_at_utc for item in tracked))
             db.close()
 
