@@ -1419,6 +1419,16 @@ def _run_source_batch(
         page_urls: list[str] = []
         seen_urls: set[str] = set()
         daily_run = getattr(args, "daily_run", False) and not args.refresh
+        collection_max_pages = (
+            max(int(args.max_pages or 1), INFINITE_MAX_PAGES)
+            if daily_run
+            else max(int(args.max_pages or 1), 1)
+        )
+        stop_at_known = (
+            (lambda url: database.has_vacancy(canonicalize_source_url(url)))
+            if daily_run
+            else None
+        )
 
         try:
             for keyword in keywords:
@@ -1434,30 +1444,31 @@ def _run_source_batch(
                 keyword_listing_urls, keyword_page_urls = source.collect_vacancy_urls(
                     keyword=keyword,
                     listing_url=args.listing_url,
-                    max_pages=args.max_pages,
+                    max_pages=collection_max_pages,
                     before_listing_fetch=lambda page_url: _sleep_before_source_request(
                         source,
                         delay_attribute="listing_request_delay_seconds",
                         label="listing",
                         url=page_url,
                     ),
+                    stop_at_vacancy=stop_at_known,
                 )
                 page_urls.extend(keyword_page_urls)
                 for vacancy_url in keyword_listing_urls:
-                    if vacancy_url in seen_urls:
-                        continue
-                    seen_urls.add(vacancy_url)
-                    # A daily run needs to keep looking past previously seen
-                    # listings.  Its limit applies to *new* vacancies, not the
-                    # first URLs on a results page, which are usually old ads.
+                    # Source adapters stop at this boundary while paging. Keep
+                    # the same guard here for simple/custom adapters that accept
+                    # **kwargs but do not implement the callback themselves.
                     if daily_run and database.has_vacancy(
                         canonicalize_source_url(vacancy_url)
                     ):
-                        continue
-                    listing_urls.append(vacancy_url)
-                    if len(listing_urls) >= args.limit:
                         break
-                if len(listing_urls) >= args.limit:
+                    if vacancy_url in seen_urls:
+                        continue
+                    seen_urls.add(vacancy_url)
+                    listing_urls.append(vacancy_url)
+                    if not daily_run and len(listing_urls) >= args.limit:
+                        break
+                if not daily_run and len(listing_urls) >= args.limit:
                     break
         except Exception as error:
             result.failed_count += 1
@@ -1465,24 +1476,24 @@ def _run_source_batch(
             return result
 
         result.total_pages = len(page_urls)
-        # Daily runs must spend their vacancy-fetch budget on new
-        # ads, not on the newest known rows.  The listing still gets fetched so
-        # new jobs farther down the first page are picked up, but known URLs do
-        # not consume ``--limit`` or cause a detail request.
+        # Daily newest-first runs end at the first known URL. The second check
+        # protects against a URL being inserted by another source worker after
+        # listing collection but before this worker begins detail processing.
         if daily_run:
             new_listing_urls = [
                 url for url in listing_urls if not database.has_vacancy(canonicalize_source_url(url))
             ]
         else:
             new_listing_urls = listing_urls
-        source_limit = min(len(new_listing_urls), args.limit)
+        process_urls = new_listing_urls if daily_run else new_listing_urls[: args.limit]
+        source_limit = len(process_urls)
         print(
             f"[{ts()}] {source.name} batch started | pages={len(page_urls)} "
             f"| collected={len(listing_urls)} | keywords={len(keywords)} "
-            f"| configured_max_pages={args.max_pages}"
+            f"| configured_max_pages={collection_max_pages}"
         )
 
-        for index, url in enumerate(new_listing_urls[: args.limit], start=1):
+        for index, url in enumerate(process_urls, start=1):
             control.wait_if_paused()
             if control.is_cancelled():
                 print(safe_console_text(f"[{ts()}] {source.name} search ended by user."))

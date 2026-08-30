@@ -2,7 +2,7 @@
 {% block content %}
 <section class="card">
   <h2>Daily schedule</h2>
-  <p class="muted">While this dashboard is running, it collects vacancies at the time below and sends a Telegram summary of new results. No Windows Task Scheduler needed.</p>
+  <p class="muted">While this dashboard is running, it collects vacancies at the time below and sends a Telegram summary of new results. Each source is scanned newest-first until the first already-known vacancy (with a 100-page safety cap), so the daily run has no fixed 10-vacancy limit.</p>
 
   {% if telegram_ready %}
   <p class="muted">Telegram: <strong>configured</strong> (bot token and chat id are set).</p>
@@ -27,14 +27,6 @@
       <div>
         <label for="time">Run at (24h, local)</label>
         <input id="time" name="time" type="time" value="{{ schedule.time }}" required>
-      </div>
-      <div>
-        <label for="limit">Max vacancies per source</label>
-        <input id="limit" name="limit" type="number" min="1" value="{{ schedule.limit }}">
-      </div>
-      <div>
-        <label for="max_pages">Listing pages per source</label>
-        <input id="max_pages" name="max_pages" type="number" min="1" value="{{ schedule.max_pages }}">
       </div>
       <div>
         <label for="analysis_strategy">Analysis</label>

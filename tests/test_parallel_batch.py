@@ -78,11 +78,14 @@ class DailyListingSource:
 
 
 class ParallelSourceBatchTests(unittest.TestCase):
-    def test_daily_run_uses_its_limit_for_new_urls_not_known_listings(self) -> None:
+    def test_daily_run_processes_all_new_urls_until_first_known_listing(self) -> None:
         known_url = "https://example.test/daily/known"
         first_new_url = "https://example.test/daily/new-1"
         second_new_url = "https://example.test/daily/new-2"
-        source = DailyListingSource([known_url, first_new_url, second_new_url])
+        later_new_url = "https://example.test/daily/new-after-known"
+        source = DailyListingSource(
+            [first_new_url, second_new_url, known_url, later_new_url]
+        )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
@@ -107,7 +110,8 @@ class ParallelSourceBatchTests(unittest.TestCase):
                 listing_url="",
                 keyword="automation",
                 search_keywords=["automation"],
-                limit=2,
+                # Daily newest-first collection no longer uses this fixed cap.
+                limit=1,
                 max_pages=1,
                 daily_run=True,
                 refresh=False,

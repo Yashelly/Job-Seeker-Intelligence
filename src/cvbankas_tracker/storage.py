@@ -1894,7 +1894,7 @@ class DatabaseManager:
                             LIMIT 1
                         )
                     )
-                ORDER BY app.status ASC, v.title ASC
+                ORDER BY COALESCE(a.score, -1) DESC, app.status ASC, v.title ASC
                 """
             ).fetchall()
         return [
