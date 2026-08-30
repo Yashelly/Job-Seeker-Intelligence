@@ -18,8 +18,14 @@ class VacancySource(Protocol):
         listing_url: str = "",
         max_pages: int = 1,
         before_listing_fetch: Callable[[str], None] | None = None,
+        stop_at_vacancy: Callable[[str], bool] | None = None,
     ) -> tuple[list[str], list[str]]:
-        """Return vacancy URLs and listing/search pages visited for this source."""
+        """Return vacancy URLs and listing/search pages visited for this source.
+
+        When ``stop_at_vacancy`` returns true, the matching URL is not included
+        and no later result pages are fetched. Daily newest-first collection uses
+        this hook to stop at the first vacancy already present in SQLite.
+        """
 
     def fetch_vacancy_page(self, url: str) -> str:
         """Fetch the raw vacancy page content."""

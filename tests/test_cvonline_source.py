@@ -90,6 +90,29 @@ class CvOnlineSourceTests(unittest.TestCase):
         self.assertEqual(len(pages), 1)
         self.assertEqual(fetch.call_count, 1)
 
+    def test_collection_stops_at_first_known_vacancy(self) -> None:
+        source = CvOnlineSource()
+        vacancies = [
+            {
+                "id": index,
+                "positionTitle": f"Role {index}",
+                "positionContent": "Description",
+                "employerName": "Company",
+            }
+            for index in range(1, 101)
+        ]
+
+        with patch.object(source, "_fetch_page", return_value=listing_page(*vacancies)) as fetch:
+            urls, pages = source.collect_vacancy_urls(
+                max_pages=100,
+                stop_at_vacancy=lambda url: "/vacancy/2/" in url,
+            )
+
+        self.assertEqual(len(urls), 1)
+        self.assertIn("/vacancy/1/", urls[0])
+        self.assertEqual(len(pages), 1)
+        fetch.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

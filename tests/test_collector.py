@@ -53,6 +53,25 @@ class CvbankasCollectorTests(unittest.TestCase):
         self.assertIn("keyw=AI+automation", url)
         self.assertIn("page=2", url)
 
+    def test_daily_collection_stops_before_known_vacancy_and_later_pages(self) -> None:
+        collector = CvbankasCollector()
+        fresh = "https://www.cvbankas.lt/fresh/1-11111111"
+        known = "https://www.cvbankas.lt/known/1-22222222"
+        page_one = (
+            f'<a class="list_a" href="{fresh}">Fresh</a>'
+            f'<a class="list_a" href="{known}">Known</a>'
+        )
+
+        with patch.object(collector, "fetch_page", return_value=page_one) as mocked_fetch:
+            urls, page_urls = collector.collect_listing_urls_from_pages(
+                max_pages=100,
+                stop_at_vacancy=lambda url: url == known,
+            )
+
+        self.assertEqual(urls, [fresh])
+        self.assertEqual(len(page_urls), 1)
+        mocked_fetch.assert_called_once()
+
     def test_manual_cvbankas_listing_url_is_forced_to_remote_section(self) -> None:
         collector = CvbankasCollector()
 

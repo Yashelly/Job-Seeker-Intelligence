@@ -32,12 +32,21 @@ class SampleVacancySource:
         listing_url: str = "",
         max_pages: int = 1,
         before_listing_fetch: Callable[[str], None] | None = None,
+        stop_at_vacancy: Callable[[str], bool] | None = None,
     ) -> tuple[list[str], list[str]]:
         listing_path = str(self._data_dir / "listings.html")
         if before_listing_fetch is not None:
             before_listing_fetch(listing_path)
         listing_html = Path(listing_path).read_text(encoding="utf-8")
-        return self._collector.collect_listing_urls(listing_html), [listing_path]
+        urls = self._collector.collect_listing_urls(listing_html)
+        if stop_at_vacancy is not None:
+            new_urls: list[str] = []
+            for url in urls:
+                if stop_at_vacancy(url):
+                    break
+                new_urls.append(url)
+            urls = new_urls
+        return urls, [listing_path]
 
     def fetch_vacancy_page(self, url: str) -> str:
         key = url.rsplit("/", maxsplit=1)[-1]

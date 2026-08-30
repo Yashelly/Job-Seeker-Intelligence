@@ -63,6 +63,7 @@ class CvOnlineSource:
         listing_url: str = "",
         max_pages: int = 1,
         before_listing_fetch: Callable[[str], None] | None = None,
+        stop_at_vacancy: Callable[[str], bool] | None = None,
     ) -> tuple[list[str], list[str]]:
         del keyword
         if listing_url:
@@ -86,17 +87,23 @@ class CvOnlineSource:
                 break
 
             hrefs = self._vacancy_hrefs(payload, page_url)
+            stop = False
             for item in vacancies:
                 if not isinstance(item, dict) or item.get("id") is None:
                     continue
                 source_id = str(item["id"])
                 source_url = hrefs.get(source_id, f"{self.base_url}/lt/vacancy/{source_id}")
                 source_url = self._canonical_url(source_url)
+                if stop_at_vacancy is not None and stop_at_vacancy(source_url):
+                    stop = True
+                    break
                 self._listing_payloads[source_url] = item
                 if source_url not in seen:
                     seen.add(source_url)
                     urls.append(source_url)
 
+            if stop:
+                break
             # The last page can be shorter than the requested page size.
             if len(vacancies) < self.page_size:
                 break

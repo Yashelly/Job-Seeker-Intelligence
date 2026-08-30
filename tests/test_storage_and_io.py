@@ -378,6 +378,30 @@ def _analysis(url: str, score: int) -> VacancyAnalysis:
 
 
 class AutoSaveAndPruneTests(unittest.TestCase):
+    def test_tracked_applications_are_sorted_by_match_descending(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(Path(tmp) / "sorted.db")
+            db.initialize()
+            low = "https://example.test/low"
+            high = "https://example.test/high"
+            db.save_processed_vacancy(
+                vacancy=_vac(low, "1"),
+                analysis=_analysis(low, 25),
+                auto_save=True,
+                auto_save_threshold=0,
+            )
+            db.save_processed_vacancy(
+                vacancy=_vac(high, "2"),
+                analysis=_analysis(high, 90),
+                auto_save=True,
+                auto_save_threshold=0,
+            )
+
+            tracked = db.list_tracked_applications()
+
+            self.assertEqual([item.latest_score for item in tracked], [90, 25])
+            db.close()
+
     def test_auto_save_disabled_creates_no_application(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db = DatabaseManager(Path(tmp) / "a.db")

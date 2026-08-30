@@ -74,25 +74,38 @@ class CvbankasCollector:
         listing_url: str | None = None,
         max_pages: int = 1,
         before_listing_fetch: Callable[[str], None] | None = None,
+        stop_at_vacancy: Callable[[str], bool] | None = None,
     ) -> tuple[list[str], list[str]]:
         if max_pages < 1:
             max_pages = 1
 
         seed_url = self._ensure_remote_listing_url(listing_url) if listing_url else self.build_listing_url(keyword=keyword)
-        page_urls = [self.build_paged_url(seed_url, page) for page in range(1, max_pages + 1)]
-
+        page_urls: list[str] = []
         collected_urls: list[str] = []
         seen: set[str] = set()
 
-        for page_url in page_urls:
+        for page in range(1, max_pages + 1):
+            page_url = self.build_paged_url(seed_url, page)
             if before_listing_fetch is not None:
                 before_listing_fetch(page_url)
             listing_html = self.fetch_page(page_url)
-            for vacancy_url in self.collect_listing_urls(listing_html):
+            page_urls.append(page_url)
+            page_vacancy_urls = self.collect_listing_urls(listing_html)
+            if not page_vacancy_urls:
+                break
+            stop = False
+            added_on_page = False
+            for vacancy_url in page_vacancy_urls:
+                if stop_at_vacancy is not None and stop_at_vacancy(vacancy_url):
+                    stop = True
+                    break
                 if vacancy_url in seen:
                     continue
                 seen.add(vacancy_url)
                 collected_urls.append(vacancy_url)
+                added_on_page = True
+            if stop or not added_on_page:
+                break
 
         return collected_urls, page_urls
 

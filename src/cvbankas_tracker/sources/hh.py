@@ -171,6 +171,7 @@ class HhHtmlSource:
         listing_url: str = "",
         max_pages: int = 1,
         before_listing_fetch: Callable[[str], None] | None = None,
+        stop_at_vacancy: Callable[[str], bool] | None = None,
     ) -> tuple[list[str], list[str]]:
         if max_pages < 1:
             max_pages = 1
@@ -181,28 +182,41 @@ class HhHtmlSource:
                 listing_url=listing_url,
                 max_pages=max_pages,
                 before_listing_fetch=before_listing_fetch,
+                stop_at_vacancy=stop_at_vacancy,
             )
 
         seed_url = listing_url or self.build_listing_url(keyword=keyword)
         seed_url = self._ensure_search_filters(seed_url)
-        page_urls = [self.build_paged_url(seed_url, page) for page in range(max_pages)]
+        page_urls: list[str] = []
         collected_urls: list[str] = []
         seen: set[str] = set()
 
-        for page_url in page_urls:
+        for page in range(max_pages):
+            page_url = self.build_paged_url(seed_url, page)
             if before_listing_fetch is not None:
                 before_listing_fetch(page_url)
             listing_html = self.fetch_vacancy_page(page_url)
+            page_urls.append(page_url)
             page_vacancy_urls = self.collect_listing_urls(listing_html)
             if not page_vacancy_urls and self._looks_listing_blocked(listing_html):
                 if collected_urls:
                     break
                 raise ValueError("HH listing page is not publicly accessible.")
+            if not page_vacancy_urls:
+                break
+            stop = False
+            added_on_page = False
             for vacancy_url in page_vacancy_urls:
+                if stop_at_vacancy is not None and stop_at_vacancy(vacancy_url):
+                    stop = True
+                    break
                 if vacancy_url in seen:
                     continue
                 seen.add(vacancy_url)
                 collected_urls.append(vacancy_url)
+                added_on_page = True
+            if stop or not added_on_page:
+                break
 
         return collected_urls, page_urls
 
@@ -570,6 +584,7 @@ class HhHtmlSource:
         listing_url: str = "",
         max_pages: int = 1,
         before_listing_fetch: Callable[[str], None] | None = None,
+        stop_at_vacancy: Callable[[str], bool] | None = None,
     ) -> tuple[list[str], list[str]]:
         seed_url = self._ensure_search_filters(listing_url or self.build_listing_url(keyword=keyword))
         collected_urls: list[str] = []
@@ -595,11 +610,21 @@ class HhHtmlSource:
                     break
                 raise ValueError("HH listing page is not publicly accessible.")
             page_urls.append(actual_url)
+            if not page_vacancy_urls:
+                break
+            stop = False
+            added_on_page = False
             for vacancy_url in page_vacancy_urls:
+                if stop_at_vacancy is not None and stop_at_vacancy(vacancy_url):
+                    stop = True
+                    break
                 if vacancy_url in seen:
                     continue
                 seen.add(vacancy_url)
                 collected_urls.append(vacancy_url)
+                added_on_page = True
+            if stop or not added_on_page:
+                break
 
         return collected_urls, page_urls
 

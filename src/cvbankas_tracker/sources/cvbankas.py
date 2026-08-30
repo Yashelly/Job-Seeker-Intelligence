@@ -48,12 +48,14 @@ class CvbankasSource:
         listing_url: str = "",
         max_pages: int = 1,
         before_listing_fetch: Callable[[str], None] | None = None,
+        stop_at_vacancy: Callable[[str], bool] | None = None,
     ) -> tuple[list[str], list[str]]:
         return self._collector.collect_listing_urls_from_pages(
             keyword=keyword,
             listing_url=listing_url or None,
             max_pages=max_pages,
             before_listing_fetch=before_listing_fetch,
+            stop_at_vacancy=stop_at_vacancy,
         )
 
     def fetch_vacancy_page(self, url: str) -> str:
