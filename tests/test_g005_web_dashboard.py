@@ -146,7 +146,7 @@ class G005WebDashboardTests(unittest.TestCase):
         self.assertNotIn("Example &amp; Co · sample", all_sources.text)
         self.assertIn("HH Automation Engineer", hh_only.text)
         self.assertNotIn("sample · rule based", hh_only.text)
-        self.assertIn('value="hh" checked', hh_only.text)
+        self.assertIn('<option value="hh" selected>hh</option>', hh_only.text)
         self.assertIn("Showing 1 of 2 saved vacancies", hh_only.text)
 
     def test_pages_render_accessible_shared_dashboard_states(self) -> None:

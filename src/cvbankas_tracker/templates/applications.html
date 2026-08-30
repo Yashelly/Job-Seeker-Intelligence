@@ -5,14 +5,14 @@
   <p class="muted">Vacancies you saved or moved through a status. Auto-saved matches (above your threshold) and anything you hit <strong>Save</strong> on land here.</p>
   {% if source_choices %}
   <form method="get" action="/applications">
-    <fieldset>
-      <legend>Filter by source</legend>
+    <label for="source-filter">Filter by source</label>
+    <select id="source-filter" name="source">
+      <option value="">All sources</option>
       {% for source in source_choices %}
-      <label class="inline"><input type="checkbox" name="source" value="{{ source }}"{% if source in selected_sources %} checked{% endif %}> {{ source }}</label>
+      <option value="{{ source }}"{% if source in selected_sources %} selected{% endif %}>{{ source }}</option>
       {% endfor %}
-      <button type="submit">Apply</button>
-      {% if selected_sources %}<a class="button" href="/applications">All sources</a>{% endif %}
-    </fieldset>
+    </select>
+    <button type="submit">Apply</button>
   </form>
   <p class="muted">Showing {{ applications|length }} of {{ application_count }} saved vacancies.</p>
   {% endif %}
