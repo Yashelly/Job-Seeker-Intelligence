@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from cvbankas_tracker.models import (
     AnalysisMethod,
+    ApplicationRecord,
     ApplicationStatus,
     FitLabel,
     InboxPreferences,
@@ -63,6 +64,32 @@ def seed_database(db_path: Path, *, hostile: bool = False) -> str:
 
 
 class G005WebDashboardTests(unittest.TestCase):
+    def test_saved_page_shows_local_saved_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "saved_date.db"
+            vacancy_url = seed_database(db_path)
+            database = DatabaseManager(db_path)
+            database.save_user_timezone("Europe/Vilnius")
+            with patch(
+                "cvbankas_tracker.storage.utc_now_iso",
+                return_value="2026-08-30T12:34:56Z",
+            ):
+                database.save_application_record(
+                    ApplicationRecord(
+                        vacancy_source_url=vacancy_url,
+                        analysis_id=database.get_latest_analysis_id(vacancy_url),
+                        status=ApplicationStatus.SAVED,
+                    )
+                )
+            database.close()
+
+            with TestClient(create_app(db_path), base_url=BASE) as client:
+                response = client.get("/applications")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Saved at", response.text)
+        self.assertIn("2026-08-30 15:34", response.text)
+
     def test_pages_render_accessible_shared_dashboard_states(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = Path(tmp_dir) / "web_pages.db"

@@ -5,13 +5,14 @@
   <p class="muted">Vacancies you saved or moved through a status. Auto-saved matches (above your threshold) and anything you hit <strong>Save</strong> on land here.</p>
   {% if applications %}
   <table>
-    <thead><tr><th>Status</th><th>Vacancy</th><th>Score ↓</th><th>Notes</th></tr></thead>
+    <thead><tr><th>Status</th><th>Vacancy</th><th>Score ↓</th><th>Saved at</th><th>Notes</th></tr></thead>
     <tbody>
     {% for app in applications %}
       <tr>
         <td>{{ app.status.value }}</td>
         <td><a href="/vacancy?url={{ app.source_url|urlencode }}">{{ app.title }}</a><br><span class="muted">{{ app.company }} · {{ app.source_name }}</span></td>
         <td>{{ app.latest_score if app.latest_score is not none else '-' }} {{ app.latest_fit_label or '' }}</td>
+        <td>{{ app.saved_at_utc|local_timestamp(timezone) }}</td>
         <td>{{ app.notes or '-' }}</td>
       </tr>
     {% endfor %}

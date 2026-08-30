@@ -277,6 +277,13 @@ def _local_due_text(due_at_utc: str | None, timezone_name: str) -> str:
     return f"{utc_iso_to_local_datetime(due_at_utc, timezone_name)} ({timezone_name})"
 
 
+def _local_timestamp_text(timestamp_utc: str | None, timezone_name: str) -> str:
+    if not timestamp_utc:
+        return "-"
+    local_value = utc_iso_to_local_datetime(timestamp_utc, timezone_name)
+    return local_value[:16].replace("T", " ")
+
+
 async def require_safe_multipart(
     request: Request,
     csrf_token: str = Form(...),
@@ -483,6 +490,7 @@ def create_app(
     templates = Jinja2Templates(directory=str(root / "templates"))
     templates.env.filters["safe_external_url"] = _safe_external_url
     templates.env.filters["local_due"] = _local_due_text
+    templates.env.filters["local_timestamp"] = _local_timestamp_text
     app.mount("/static", StaticFiles(directory=str(root / "static")), name="static")
 
     @app.get("/")
