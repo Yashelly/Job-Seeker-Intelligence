@@ -277,6 +277,13 @@ def _local_due_text(due_at_utc: str | None, timezone_name: str) -> str:
     return f"{utc_iso_to_local_datetime(due_at_utc, timezone_name)} ({timezone_name})"
 
 
+def _local_timestamp_text(timestamp_utc: str | None, timezone_name: str) -> str:
+    if not timestamp_utc:
+        return "-"
+    local_value = utc_iso_to_local_datetime(timestamp_utc, timezone_name)
+    return local_value[:16].replace("T", " ")
+
+
 async def require_safe_multipart(
     request: Request,
     csrf_token: str = Form(...),
@@ -483,6 +490,7 @@ def create_app(
     templates = Jinja2Templates(directory=str(root / "templates"))
     templates.env.filters["safe_external_url"] = _safe_external_url
     templates.env.filters["local_due"] = _local_due_text
+    templates.env.filters["local_timestamp"] = _local_timestamp_text
     app.mount("/static", StaticFiles(directory=str(root / "static")), name="static")
 
     @app.get("/")
@@ -550,12 +558,27 @@ def create_app(
     @app.get("/applications")
     def applications(request: Request):
         database = _db(request)
+        all_applications = database.list_tracked_applications()
+        source_choices = sorted({item.source_name for item in all_applications})
+        selected_sources = [
+            source
+            for source in request.query_params.getlist("source")
+            if source in source_choices
+        ]
+        visible_applications = (
+            [item for item in all_applications if item.source_name in selected_sources]
+            if selected_sources
+            else all_applications
+        )
         return _render(
             templates,
             request,
             "applications.html",
             page_title="Saved",
-            applications=database.list_tracked_applications(),
+            applications=visible_applications,
+            application_count=len(all_applications),
+            source_choices=source_choices,
+            selected_sources=selected_sources,
             statuses=list(ApplicationStatus),
             actions=database.list_action_items(),
             vacancies=database.list_vacancies_with_latest_scores(),

@@ -41,15 +41,15 @@ class CvbankasCollectorTests(unittest.TestCase):
         )
         self.assertEqual(mocked_fetch.call_count, 2)
         self.assertIn("keyw=python", page_urls[0])
-        self.assertIn("/darbas-darbas-namuose", page_urls[0])
+        self.assertEqual(page_urls[0], "https://www.cvbankas.lt/?keyw=python")
         self.assertIn("page=2", page_urls[1])
 
-    def test_build_listing_url_uses_cvbankas_remote_section(self) -> None:
+    def test_build_listing_url_uses_cvbankas_all_vacancies_catalog(self) -> None:
         collector = CvbankasCollector()
 
         url = collector.build_listing_url(keyword="AI automation", page=2)
 
-        self.assertIn("https://www.cvbankas.lt/darbas-darbas-namuose", url)
+        self.assertTrue(url.startswith("https://www.cvbankas.lt/?"))
         self.assertIn("keyw=AI+automation", url)
         self.assertIn("page=2", url)
 
@@ -72,7 +72,7 @@ class CvbankasCollectorTests(unittest.TestCase):
         self.assertEqual(len(page_urls), 1)
         mocked_fetch.assert_called_once()
 
-    def test_manual_cvbankas_listing_url_is_forced_to_remote_section(self) -> None:
+    def test_manual_cvbankas_listing_url_is_preserved(self) -> None:
         collector = CvbankasCollector()
 
         with patch.object(collector, "fetch_page", return_value="") as mocked_fetch:
@@ -81,7 +81,7 @@ class CvbankasCollectorTests(unittest.TestCase):
                 max_pages=1,
             )
 
-        self.assertEqual(page_urls[0], "https://www.cvbankas.lt/darbas-darbas-namuose?keyw=n8n")
+        self.assertEqual(page_urls[0], "https://www.cvbankas.lt/?keyw=n8n")
         mocked_fetch.assert_called_once_with(page_urls[0])
 
 

@@ -1879,7 +1879,14 @@ class DatabaseManager:
                     app.status,
                     app.notes,
                     a.score AS latest_score,
-                    a.fit_label AS latest_fit_label
+                    a.fit_label AS latest_fit_label,
+                    a.analysis_method,
+                    (
+                        SELECT MIN(event.changed_at)
+                        FROM application_status_events event
+                        WHERE event.vacancy_source_url = app.vacancy_source_url
+                          AND event.new_status = 'Saved'
+                    ) AS saved_at_utc
                 FROM applications app
                 JOIN vacancies v
                     ON v.source_url = app.vacancy_source_url
@@ -1907,6 +1914,8 @@ class DatabaseManager:
                 status=ApplicationStatus(row["status"]),
                 latest_score=row["latest_score"],
                 latest_fit_label=row["latest_fit_label"],
+                analysis_method=row["analysis_method"],
+                saved_at_utc=row["saved_at_utc"],
                 notes=row["notes"],
             )
             for row in rows

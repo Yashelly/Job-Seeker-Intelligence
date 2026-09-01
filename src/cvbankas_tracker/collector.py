@@ -19,7 +19,6 @@ def _is_cvbankas_host(url: str) -> bool:
 
 
 class CvbankasCollector:
-    _REMOTE_LISTING_PATH = "/darbas-darbas-namuose"
     _LISTING_LINK_PATTERN = re.compile(
         r'<a[^>]*class="[^"]*\blist_a\b[^"]*"[^>]*href="(?P<url>[^"]+)"',
         re.IGNORECASE,
@@ -27,7 +26,7 @@ class CvbankasCollector:
     _GENERIC_LINK_PATTERN = re.compile(r'href="(?P<url>[^"]+)"', re.IGNORECASE)
 
     def build_listing_url(self, keyword: str | None = None, page: int = 1) -> str:
-        base_url = f"https://www.cvbankas.lt{self._REMOTE_LISTING_PATH}"
+        base_url = "https://www.cvbankas.lt/"
         params: dict[str, str] = {}
         if keyword:
             params["keyw"] = keyword
@@ -79,7 +78,7 @@ class CvbankasCollector:
         if max_pages < 1:
             max_pages = 1
 
-        seed_url = self._ensure_remote_listing_url(listing_url) if listing_url else self.build_listing_url(keyword=keyword)
+        seed_url = listing_url or self.build_listing_url(keyword=keyword)
         page_urls: list[str] = []
         collected_urls: list[str] = []
         seen: set[str] = set()
@@ -108,14 +107,6 @@ class CvbankasCollector:
                 break
 
         return collected_urls, page_urls
-
-    def _ensure_remote_listing_url(self, listing_url: str) -> str:
-        parsed = urlparse(listing_url)
-        if "cvbankas.lt" not in parsed.netloc.lower():
-            return listing_url
-        if parsed.path.rstrip("/") == self._REMOTE_LISTING_PATH:
-            return listing_url
-        return urlunparse(parsed._replace(path=self._REMOTE_LISTING_PATH))
 
     def fetch_page(self, url: str) -> str:
         parsed = urlparse(url)

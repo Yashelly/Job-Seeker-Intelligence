@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from cvbankas_tracker.models import (
     AnalysisMethod,
+    ApplicationRecord,
     ApplicationStatus,
     FitLabel,
     InboxPreferences,
@@ -63,6 +64,91 @@ def seed_database(db_path: Path, *, hostile: bool = False) -> str:
 
 
 class G005WebDashboardTests(unittest.TestCase):
+    def test_saved_page_shows_local_saved_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "saved_date.db"
+            vacancy_url = seed_database(db_path)
+            database = DatabaseManager(db_path)
+            database.save_user_timezone("Europe/Vilnius")
+            with patch(
+                "cvbankas_tracker.storage.utc_now_iso",
+                return_value="2026-08-30T12:34:56Z",
+            ):
+                database.save_application_record(
+                    ApplicationRecord(
+                        vacancy_source_url=vacancy_url,
+                        analysis_id=database.get_latest_analysis_id(vacancy_url),
+                        status=ApplicationStatus.SAVED,
+                    )
+                )
+            database.close()
+
+            with TestClient(create_app(db_path), base_url=BASE) as client:
+                response = client.get("/applications")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Saved at", response.text)
+        self.assertIn("2026-08-30 15:34", response.text)
+
+    def test_saved_page_filters_sources_and_shows_compact_source_method(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "saved_sources.db"
+            sample_url = seed_database(db_path)
+            hh_url = "https://hh.ru/vacancy/123"
+            database = DatabaseManager(db_path)
+            sample_analysis_id = database.get_latest_analysis_id(sample_url)
+            database.save_application_record(
+                ApplicationRecord(
+                    vacancy_source_url=sample_url,
+                    analysis_id=sample_analysis_id,
+                    status=ApplicationStatus.SAVED,
+                    notes="A long note that should not be rendered in the table.",
+                )
+            )
+            database.save_vacancy(
+                Vacancy(
+                    source_name="hh",
+                    source_id="123",
+                    source_url=hh_url,
+                    title="HH Automation Engineer",
+                    company="HH Company",
+                    location="Remote",
+                    salary_text="",
+                )
+            )
+            hh_analysis_id = database.save_analysis(
+                VacancyAnalysis(
+                    vacancy_source_url=hh_url,
+                    analysis_method=AnalysisMethod.RULE_BASED,
+                    score=75,
+                    fit_label=FitLabel.MEDIUM,
+                    explanation="Good fit.",
+                    matched_points=("Automation",),
+                    missing_points=(),
+                )
+            )
+            database.save_application_record(
+                ApplicationRecord(
+                    vacancy_source_url=hh_url,
+                    analysis_id=hh_analysis_id,
+                    status=ApplicationStatus.SAVED,
+                )
+            )
+            database.close()
+
+            with TestClient(create_app(db_path), base_url=BASE) as client:
+                all_sources = client.get("/applications")
+                hh_only = client.get("/applications?source=hh")
+
+        self.assertIn("sample · rule based", all_sources.text)
+        self.assertIn("hh · rule based", all_sources.text)
+        self.assertNotIn("A long note that should not be rendered", all_sources.text)
+        self.assertNotIn("Example &amp; Co · sample", all_sources.text)
+        self.assertIn("HH Automation Engineer", hh_only.text)
+        self.assertNotIn("sample · rule based", hh_only.text)
+        self.assertIn('<option value="hh" selected>hh</option>', hh_only.text)
+        self.assertIn("Showing 1 of 2 saved vacancies", hh_only.text)
+
     def test_pages_render_accessible_shared_dashboard_states(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = Path(tmp_dir) / "web_pages.db"
