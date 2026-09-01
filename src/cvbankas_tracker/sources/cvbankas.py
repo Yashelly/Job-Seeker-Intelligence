@@ -11,16 +11,7 @@ from ..parser import VacancyParser
 
 class CvbankasSource:
     name = "cvbankas"
-    remote_only = True
     exclude_russia_belarus = True
-    remote_markers = (
-        "darbas namuose",
-        "nuotolinis",
-        "nuotoliniu",
-        "nuotoliu",
-        "remote",
-        "work from home",
-    )
     excluded_location_markers = (
         "belarus",
         "russia",
@@ -63,8 +54,6 @@ class CvbankasSource:
 
     def parse_vacancy(self, html_text: str, source_url: str) -> Vacancy:
         vacancy = self._parser.parse(html_text, source_url, source_name=self.name)
-        if self.remote_only and not self._looks_remote(vacancy, html_text):
-            raise ValueError("CVbankas vacancy is not marked as remote.")
         if self.exclude_russia_belarus and self._looks_excluded_location(vacancy.location):
             raise ValueError("CVbankas vacancy is located in Russia or Belarus.")
         return vacancy
@@ -72,12 +61,6 @@ class CvbankasSource:
     def can_handle_url(self, url: str) -> bool:
         host = urlparse(url).netloc.lower()
         return host == "cvbankas.lt" or host.endswith(".cvbankas.lt")
-
-    def _looks_remote(self, vacancy: Vacancy, html_text: str) -> bool:
-        haystack = self._clean_text(
-            " ".join([vacancy.title, vacancy.location, vacancy.source_url, html_text])
-        ).lower()
-        return any(marker in haystack for marker in self.remote_markers)
 
     def _looks_excluded_location(self, location: str) -> bool:
         normalized_location = self._clean_text(location).lower().replace("ё", "е")

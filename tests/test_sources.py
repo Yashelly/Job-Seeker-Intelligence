@@ -95,7 +95,7 @@ class SourceRegistryTests(unittest.TestCase):
             ["global one", "global two"],
         )
 
-    def test_cvbankas_source_requires_remote_marker(self) -> None:
+    def test_cvbankas_source_accepts_office_vacancy(self) -> None:
         html = """
         <html>
           <body>
@@ -106,11 +106,12 @@ class SourceRegistryTests(unittest.TestCase):
         </html>
         """
 
-        with self.assertRaisesRegex(ValueError, "not marked as remote"):
-            CvbankasSource().parse_vacancy(
-                html,
-                "https://www.cvbankas.lt/ai-automation-specialist-vilniuje/1-11111111",
-            )
+        vacancy = CvbankasSource().parse_vacancy(
+            html,
+            "https://www.cvbankas.lt/ai-automation-specialist-vilniuje/1-11111111",
+        )
+
+        self.assertEqual(vacancy.location, "Vilnius")
 
     def test_cvbankas_source_accepts_darbas_namuose_marker(self) -> None:
         html = """

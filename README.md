@@ -247,7 +247,8 @@ The app prefers `config/cvbankas.local.yaml`; TUI changes persist there. Per-sou
 
 | Source | ID | Collection | Notes |
 | --- | --- | --- | --- |
-| CVbankas | `cvbankas` | HTML parsing | LT/EN automation & AI keywords |
+| CVbankas | `cvbankas` | HTML parsing | Keyword search across office, hybrid, and remote vacancies |
+| CV-Online | `cvonline` | Public feed | All work modes, unfiltered newest-first feed |
 | HH.ru | `hh` | Playwright | Remote roles, throttled |
 | JustJoin.it | `justjoin` | HTML parsing | EN automation/AI/tooling |
 | Startup Jobs | `startup_jobs` | Playwright | Startup AI/automation |
