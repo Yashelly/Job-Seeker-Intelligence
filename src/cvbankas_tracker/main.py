@@ -10,7 +10,7 @@ import textwrap
 import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -81,6 +81,15 @@ class SourceBatchResult:
     observed_count: int = 0
     failed_count: int = 0
     total_pages: int = 0
+    error_messages: list[str] = field(default_factory=list)
+
+
+def _source_error_message(stage: str, error: Exception, *, limit: int = 240) -> str:
+    detail = " ".join(str(error).split()) or type(error).__name__
+    message = f"{stage}: {detail}"
+    if len(message) <= limit:
+        return message
+    return f"{message[: limit - 3].rstrip()}..."
 
 
 def load_dotenv_if_present(dotenv_path: str | Path = ".env") -> None:
@@ -1472,6 +1481,7 @@ def _run_source_batch(
                     break
         except Exception as error:
             result.failed_count += 1
+            result.error_messages.append(_source_error_message("listing", error))
             print(safe_console_text(f"[{ts()}] {source.name} LISTING ERROR | {error}"))
             return result
 
@@ -1516,6 +1526,9 @@ def _run_source_batch(
             except Exception as error:
                 result.failed_count += 1
                 error_label = "STORAGE LOCK ERROR" if _is_sqlite_lock_error(error) else "ERROR"
+                result.error_messages.append(
+                    _source_error_message(f"vacancy {index}/{source_limit}", error)
+                )
                 print(
                     safe_console_text(
                         f"[{ts()}] [{source.name} {index}/{source_limit}] {error_label} | {url} | {error}"
@@ -1555,6 +1568,7 @@ def _execute_source_batches(
                         source_name=source.name,
                         report_rows=[],
                         failed_count=1,
+                        error_messages=[_source_error_message("worker", error)],
                     )
                 )
     return results
@@ -1581,6 +1595,11 @@ def _send_telegram_batch_summary(
     source_names = [result.source_name for result in source_results]
     attempted_count = sum(result.attempted_count for result in source_results)
     failed_count = sum(result.failed_count for result in source_results)
+    source_errors = [
+        f"{result.source_name}: {message}"
+        for result in source_results
+        for message in result.error_messages
+    ]
     max_vacancies = int(_cfg_get(cfg, "telegram", "max_vacancies", default=10))
     notify_when_empty = _cfg_bool(
         cfg,
@@ -1594,6 +1613,7 @@ def _send_telegram_batch_summary(
             source_names=source_names,
             attempted_count=attempted_count,
             failed_count=failed_count,
+            source_errors=source_errors,
             max_vacancies=max_vacancies,
             notify_when_empty=notify_when_empty,
         )
