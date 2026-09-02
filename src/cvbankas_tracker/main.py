@@ -1591,9 +1591,18 @@ def _send_telegram_batch_summary(
     cfg: dict,
     source_results: list[SourceBatchResult],
     report_rows: list[tuple[Vacancy, VacancyAnalysis, ApplicationRecord | None]],
+    recovered_count: int = 0,
 ) -> bool:
-    source_names = [result.source_name for result in source_results]
-    attempted_count = sum(result.attempted_count for result in source_results)
+    source_names = list(
+        dict.fromkeys(
+            [result.source_name for result in source_results]
+            + [vacancy.source_name for vacancy, _analysis, _application in report_rows]
+        )
+    )
+    attempted_count = max(
+        sum(result.attempted_count for result in source_results),
+        len(report_rows),
+    )
     failed_count = sum(result.failed_count for result in source_results)
     source_errors = [
         f"{result.source_name}: {message}"
@@ -1614,6 +1623,7 @@ def _send_telegram_batch_summary(
             attempted_count=attempted_count,
             failed_count=failed_count,
             source_errors=source_errors,
+            recovered_count=recovered_count,
             max_vacancies=max_vacancies,
             notify_when_empty=notify_when_empty,
         )
@@ -1677,8 +1687,11 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
 
     database = DatabaseManager(workspace / args.db)
     database.initialize()
+    daily_run = bool(getattr(args, "daily_run", False))
     try:
-        collection_run = database.begin_collection_run()
+        collection_run = database.begin_collection_run(
+            queue_telegram_summary=daily_run
+        )
     except CollectionRunAlreadyActive as error:
         # A lease left behind by a crashed/killed run would otherwise block every
         # future batch forever. Reap runs that are provably stale and retry once;
@@ -1692,7 +1705,9 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
             return 3
         print(safe_console_text(f"[{ts()}] Recovered {reaped} stranded collection run(s); retrying."))
         try:
-            collection_run = database.begin_collection_run()
+            collection_run = database.begin_collection_run(
+                queue_telegram_summary=daily_run
+            )
         except CollectionRunAlreadyActive as retry_error:
             print(safe_console_text(f"[{ts()}] COLLECTION RUN ACTIVE | {retry_error}"))
             return 3
@@ -1775,14 +1790,51 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
     attempted_count = sum(result.attempted_count for result in source_results)
     total_pages = sum(result.total_pages for result in source_results)
 
-    report_path = report_writer.write_report(workspace / args.export, report_rows)
+    summary_rows = report_rows
+    pending_summary_run_ids: list[int] = []
+    summary_prepared = True
+    if daily_run:
+        try:
+            pending_summary_run_ids, summary_rows = (
+                database.list_pending_telegram_summary_rows()
+            )
+        except Exception as error:
+            summary_prepared = False
+            print(
+                safe_console_text(
+                    f"[{ts()}] TELEGRAM OUTBOX ERROR | could not load pending summaries | {error}"
+                )
+            )
+
+    recovered_count = max(0, len(summary_rows) - len(report_rows))
+    if recovered_count:
+        print(
+            f"[{ts()}] Telegram outbox recovered {recovered_count} "
+            "vacancies from interrupted run(s)."
+        )
+
+    report_path = report_writer.write_report(workspace / args.export, summary_rows)
     notification_ok = True
-    if getattr(args, "daily_run", False):
+    if daily_run and summary_prepared:
         notification_ok = _send_telegram_batch_summary(
             cfg=cfg,
             source_results=source_results,
-            report_rows=report_rows,
+            report_rows=summary_rows,
+            recovered_count=recovered_count,
         )
+        if notification_ok:
+            try:
+                database.mark_telegram_summaries_delivered(pending_summary_run_ids)
+            except Exception as error:
+                notification_ok = False
+                print(
+                    safe_console_text(
+                        f"[{ts()}] TELEGRAM OUTBOX ERROR | summary sent but delivery "
+                        f"could not be recorded | {error}"
+                    )
+                )
+    elif daily_run:
+        notification_ok = False
 
     print(
         f"\n[{ts()}] Vacancy batch finished. "
@@ -1793,7 +1845,7 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
     print(f"Report written to: {report_path}")
     if not notification_ok:
         return 1
-    return 0 if report_rows else 2
+    return 0 if summary_rows else 2
 
 
 def run_recover_command(args: argparse.Namespace) -> int:
