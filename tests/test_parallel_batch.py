@@ -173,6 +173,7 @@ class ParallelSourceBatchTests(unittest.TestCase):
         results = _execute_source_batches(sources, worker)
 
         self.assertEqual(results[0].failed_count, 1)
+        self.assertEqual(results[0].error_messages, ["worker: source failed"])
         self.assertEqual(results[1].attempted_count, 3)
 
     def test_run_batch_processes_two_sources_concurrently_into_one_database(self) -> None:

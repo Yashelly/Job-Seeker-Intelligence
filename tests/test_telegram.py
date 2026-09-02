@@ -98,6 +98,18 @@ class TelegramNotificationTests(unittest.TestCase):
         self.assertIn('href="https://example.test/higher"', summary)
         self.assertIn("Example &amp; Co", summary)
 
+    def test_daily_summary_includes_escaped_source_errors(self) -> None:
+        summary = build_daily_summary(
+            [],
+            source_names=["hh"],
+            attempted_count=0,
+            failed_count=1,
+            source_errors=["hh: listing: blocked <temporarily>"],
+        )
+
+        self.assertIn("<b>Errors</b>", summary)
+        self.assertIn("• hh: listing: blocked &lt;temporarily&gt;", summary)
+
     def test_split_telegram_text_respects_message_limit(self) -> None:
         text = "\n\n".join(f"Vacancy {index}: {'x' * 80}" for index in range(20))
 
@@ -155,6 +167,25 @@ class TelegramNotificationTests(unittest.TestCase):
 
         self.assertEqual(sent_count, 0)
         urlopen_mock.assert_not_called()
+
+    @patch("src.cvbankas_tracker.telegram.urlopen")
+    def test_error_summary_is_sent_even_when_empty_notifications_are_disabled(
+        self, urlopen_mock
+    ) -> None:
+        urlopen_mock.return_value = FakeResponse({"ok": True, "result": {}})
+        notifier = TelegramNotifier("token", "123")
+
+        sent_count = notifier.send_daily_summary(
+            [],
+            source_names=["hh"],
+            attempted_count=0,
+            failed_count=1,
+            notify_when_empty=False,
+            source_errors=["hh: listing: blocked"],
+        )
+
+        self.assertEqual(sent_count, 1)
+        urlopen_mock.assert_called_once()
 
 
 class TelegramRetryTests(unittest.TestCase):

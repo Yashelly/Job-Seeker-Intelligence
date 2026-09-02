@@ -115,8 +115,9 @@ class TelegramNotifier:
         failed_count: int,
         max_vacancies: int = 10,
         notify_when_empty: bool = False,
+        source_errors: list[str] | None = None,
     ) -> int:
-        if not rows and not notify_when_empty:
+        if not rows and not notify_when_empty and not source_errors:
             return 0
 
         text = build_daily_summary(
@@ -125,6 +126,7 @@ class TelegramNotifier:
             attempted_count=attempted_count,
             failed_count=failed_count,
             max_vacancies=max_vacancies,
+            source_errors=source_errors,
         )
         return self.send_text(text)
 
@@ -235,6 +237,7 @@ def build_daily_summary(
     attempted_count: int,
     failed_count: int,
     max_vacancies: int = 10,
+    source_errors: list[str] | None = None,
 ) -> str:
     sorted_rows = sorted(
         rows,
@@ -250,6 +253,14 @@ def build_daily_summary(
         f"Source errors: {failed_count}",
         f"Sources: {html.escape(source_label)}",
     ]
+
+    if source_errors:
+        visible_errors = source_errors[:8]
+        lines.extend(["", "<b>Errors</b>"])
+        lines.extend(f"• {html.escape(error)}" for error in visible_errors)
+        hidden_error_count = len(source_errors) - len(visible_errors)
+        if hidden_error_count > 0:
+            lines.append(f"• Plus {hidden_error_count} more error(s) in the local log.")
 
     if not sorted_rows:
         lines.extend(["", "No new matching vacancies today."])
