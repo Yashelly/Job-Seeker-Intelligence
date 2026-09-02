@@ -420,6 +420,13 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
             FOREIGN KEY (vacancy_source_url) REFERENCES vacancies(source_url)
         );
 
+        CREATE TABLE IF NOT EXISTS telegram_summary_outbox (
+            run_id INTEGER PRIMARY KEY,
+            queued_at TEXT NOT NULL,
+            delivered_at TEXT,
+            FOREIGN KEY (run_id) REFERENCES collection_runs(id)
+        );
+
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value_json TEXT NOT NULL
@@ -510,6 +517,8 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
             ON collection_runs(status, finished_at);
         CREATE INDEX IF NOT EXISTS idx_observations_run_source
             ON collection_run_observations(run_id, source_name);
+        CREATE INDEX IF NOT EXISTS idx_telegram_summary_outbox_pending
+            ON telegram_summary_outbox(delivered_at, run_id);
         CREATE INDEX IF NOT EXISTS idx_analyses_score_fit
             ON analyses(score, fit_label);
         CREATE INDEX IF NOT EXISTS idx_vacancy_url_aliases_canonical
@@ -526,7 +535,19 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
 
 
 def _schema_needs_migration(connection: sqlite3.Connection) -> bool:
-    required_tables = {"vacancies", "analyses", "applications", "collection_runs", "collection_run_leases", "collection_run_observations", "settings", "vacancy_url_aliases", "application_status_events", "action_items"}
+    required_tables = {
+        "vacancies",
+        "analyses",
+        "applications",
+        "collection_runs",
+        "collection_run_leases",
+        "collection_run_observations",
+        "telegram_summary_outbox",
+        "settings",
+        "vacancy_url_aliases",
+        "application_status_events",
+        "action_items",
+    }
     existing_tables = {
         row["name"]
         for row in connection.execute(
@@ -550,6 +571,7 @@ def _schema_needs_migration(connection: sqlite3.Connection) -> bool:
         "idx_vacancies_source_score_lookup",
         "idx_collection_runs_status_finished",
         "idx_observations_run_source",
+        "idx_telegram_summary_outbox_pending",
         "idx_analyses_score_fit",
         "idx_vacancy_url_aliases_canonical",
         "idx_application_status_events_vacancy",
@@ -877,7 +899,7 @@ class DatabaseManager:
     def close(self) -> None:
         """Compatibility no-op; operational connections are per method."""
 
-    def begin_collection_run(self) -> CollectionRun:
+    def begin_collection_run(self, *, queue_telegram_summary: bool = False) -> CollectionRun:
         now = utc_now_iso()
         db_identity = str(self._db_path)
         with _write_lock_for(self._db_path):
@@ -909,6 +931,11 @@ class DatabaseManager:
                         "INSERT OR REPLACE INTO collection_run_leases (db_path, run_id, acquired_at) VALUES (?, ?, ?)",
                         (db_identity, run_id, now),
                     )
+                    if queue_telegram_summary:
+                        connection.execute(
+                            "INSERT INTO telegram_summary_outbox (run_id, queued_at) VALUES (?, ?)",
+                            (run_id, now),
+                        )
                     connection.commit()
                 except Exception:
                     connection.rollback()
@@ -1034,6 +1061,67 @@ class DatabaseManager:
                 (capped,),
             ).fetchall()
         return [_collection_run_from_row(row) for row in rows]
+
+    def list_pending_telegram_summary_rows(
+        self,
+    ) -> tuple[
+        list[int],
+        list[tuple[Vacancy, VacancyAnalysis, ApplicationRecord | None]],
+    ]:
+        """Return every fully processed vacancy awaiting a Telegram summary.
+
+        Daily runs enter the outbox in the same transaction that creates the
+        collection run. A process crash can therefore lose only in-memory state,
+        not the knowledge that its already-committed vacancies still need to be
+        reported by a later retry.
+        """
+
+        with self.connection() as connection:
+            pending_runs = connection.execute(
+                """
+                SELECT run_id
+                FROM telegram_summary_outbox
+                WHERE delivered_at IS NULL
+                ORDER BY run_id
+                """
+            ).fetchall()
+            vacancy_rows = connection.execute(
+                """
+                SELECT v.source_url
+                FROM telegram_summary_outbox outbox
+                JOIN vacancies v ON v.first_seen_run_id = outbox.run_id
+                WHERE outbox.delivered_at IS NULL
+                ORDER BY outbox.run_id, v.first_seen_at, v.source_url
+                """
+            ).fetchall()
+
+        run_ids = [int(row["run_id"]) for row in pending_runs]
+        rows: list[tuple[Vacancy, VacancyAnalysis, ApplicationRecord | None]] = []
+        for vacancy_row in vacancy_rows:
+            source_url = str(vacancy_row["source_url"])
+            vacancy = self.get_vacancy(source_url)
+            analysis = self.get_latest_analysis(source_url)
+            if vacancy is None or analysis is None:
+                raise RuntimeError(
+                    f"Pending Telegram vacancy is incomplete: {source_url}"
+                )
+            rows.append((vacancy, analysis, self.get_application_record(source_url)))
+        return run_ids, rows
+
+    def mark_telegram_summaries_delivered(self, run_ids: list[int]) -> None:
+        normalized_ids = sorted({int(run_id) for run_id in run_ids})
+        if not normalized_ids:
+            return
+        placeholders = ",".join("?" for _ in normalized_ids)
+        with self.transaction() as connection:
+            connection.execute(
+                f"""
+                UPDATE telegram_summary_outbox
+                SET delivered_at = ?
+                WHERE delivered_at IS NULL AND run_id IN ({placeholders})
+                """,
+                (utc_now_iso(), *normalized_ids),
+            )
 
     def record_vacancy_observation(
         self,
@@ -1559,6 +1647,12 @@ class DatabaseManager:
                 WHERE app.vacancy_source_url IS NULL
                   AND a.score IS NOT NULL
                   AND a.score < ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM telegram_summary_outbox outbox
+                      WHERE outbox.run_id = v.first_seen_run_id
+                        AND outbox.delivered_at IS NULL
+                  )
                 """,
                 (threshold,),
             ).fetchall()

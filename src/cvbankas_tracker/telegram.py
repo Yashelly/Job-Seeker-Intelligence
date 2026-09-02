@@ -116,6 +116,7 @@ class TelegramNotifier:
         max_vacancies: int = 10,
         notify_when_empty: bool = False,
         source_errors: list[str] | None = None,
+        recovered_count: int = 0,
     ) -> int:
         if not rows and not notify_when_empty and not source_errors:
             return 0
@@ -127,6 +128,7 @@ class TelegramNotifier:
             failed_count=failed_count,
             max_vacancies=max_vacancies,
             source_errors=source_errors,
+            recovered_count=recovered_count,
         )
         return self.send_text(text)
 
@@ -238,6 +240,7 @@ def build_daily_summary(
     failed_count: int,
     max_vacancies: int = 10,
     source_errors: list[str] | None = None,
+    recovered_count: int = 0,
 ) -> str:
     sorted_rows = sorted(
         rows,
@@ -253,6 +256,8 @@ def build_daily_summary(
         f"Source errors: {failed_count}",
         f"Sources: {html.escape(source_label)}",
     ]
+    if recovered_count:
+        lines.insert(3, f"Recovered after interrupted run: <b>{recovered_count}</b>")
 
     if source_errors:
         visible_errors = source_errors[:8]

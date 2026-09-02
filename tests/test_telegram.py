@@ -110,6 +110,17 @@ class TelegramNotificationTests(unittest.TestCase):
         self.assertIn("<b>Errors</b>", summary)
         self.assertIn("• hh: listing: blocked &lt;temporarily&gt;", summary)
 
+    def test_daily_summary_labels_recovered_vacancies(self) -> None:
+        summary = build_daily_summary(
+            [],
+            source_names=["cvbankas"],
+            attempted_count=10,
+            failed_count=0,
+            recovered_count=10,
+        )
+
+        self.assertIn("Recovered after interrupted run: <b>10</b>", summary)
+
     def test_split_telegram_text_respects_message_limit(self) -> None:
         text = "\n\n".join(f"Vacancy {index}: {'x' * 80}" for index in range(20))
 
