@@ -258,6 +258,32 @@ class G005WebDashboardTests(unittest.TestCase):
         self.assertEqual(bad_origin.status_code, 403)
         self.assertEqual(bad_host.status_code, 400)
 
+    def test_posts_accept_a_hostname_that_resolves_only_to_loopback(self) -> None:
+        loopback_info = [(socket.AF_INET, 0, 0, "", ("127.0.0.1", 0))]
+        public_info = [(socket.AF_INET, 0, 0, "", ("203.0.113.10", 0))]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "web_local_alias.db"
+            seed_database(db_path)
+            with patch("cvbankas_tracker.web.socket.getaddrinfo", return_value=loopback_info):
+                with TestClient(create_app(db_path), base_url="http://jobseeker") as client:
+                    token = client.get("/settings").cookies["job_seeker_csrf"]
+                    accepted = client.post(
+                        "/settings",
+                        headers={"origin": "http://jobseeker"},
+                        data={"csrf_token": token, "minimum_score": "10", "sort_by": "score"},
+                        follow_redirects=False,
+                    )
+            with patch("cvbankas_tracker.web.socket.getaddrinfo", return_value=public_info):
+                with TestClient(create_app(db_path), base_url="http://jobseeker") as client:
+                    rejected = client.post(
+                        "/settings",
+                        headers={"origin": "http://jobseeker"},
+                        data={"csrf_token": "x", "minimum_score": "10", "sort_by": "score"},
+                    )
+
+        self.assertEqual(accepted.status_code, 303)
+        self.assertEqual(rejected.status_code, 400)
+
     def test_loopback_bind_validation_rejects_public_hosts_and_no_submit_route_exists(self) -> None:
         self.assertEqual(validate_loopback_bind_host("127.0.0.1"), "127.0.0.1")
         self.assertEqual(validate_loopback_bind_host("localhost"), "localhost")

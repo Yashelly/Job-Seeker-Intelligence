@@ -88,6 +88,26 @@ def validate_loopback_bind_host(host: str) -> str:
     return candidate
 
 
+def _resolves_exclusively_to_loopback(host: str) -> bool:
+    """Return whether an IP or local hostname resolves only to loopback."""
+
+    candidate = (host or "").strip().strip("[]")
+    if not candidate or candidate in {"0.0.0.0", "::", "*"}:
+        return False
+    try:
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(candidate, None)
+        except (socket.gaierror, UnicodeError):
+            return False
+        try:
+            addresses = {ipaddress.ip_address(info[4][0]) for info in infos}
+        except (IndexError, ValueError):
+            return False
+        return bool(addresses) and all(address.is_loopback for address in addresses)
+
+
 def _host_without_port(value: str) -> str:
     host = value.strip()
     if host.startswith("[") and "]" in host:
@@ -98,11 +118,7 @@ def _host_without_port(value: str) -> str:
 def _is_loopback_request_host(value: str | None) -> bool:
     if not value:
         return False
-    try:
-        validate_loopback_bind_host(_host_without_port(value))
-    except ValueError:
-        return False
-    return True
+    return _resolves_exclusively_to_loopback(_host_without_port(value))
 
 
 def _origin_matches_request(request: Request) -> bool:
