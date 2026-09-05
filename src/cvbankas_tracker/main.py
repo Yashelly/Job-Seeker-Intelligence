@@ -223,9 +223,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        choices=("live", "sample", "cvbankas", "cvonline"),
+        choices=("live", "sample", "cvbankas", "cvmarket", "cvonline"),
         default="live",
-        help="Legacy single-source selector: live/cvbankas or local sample fixtures.",
+        help="Legacy single-source selector for one configured vacancy provider.",
     )
     parser.add_argument(
         "--sources",

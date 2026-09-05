@@ -51,6 +51,7 @@ from .tracking import ActionService, ApplicationTracker, utc_iso_to_local_dateti
 
 CANONICAL_SOURCES = (
     "cvbankas",
+    "cvmarket",
     "hh",
     "startup_jobs",
     "justjoin",
@@ -77,6 +78,15 @@ QUICK_START_KEYWORDS = (
 
 QUICK_START_SOURCE_KEYWORDS = {
     "cvbankas": (
+        "AI automation",
+        "dirbtinio intelekto",
+        "Power Automate",
+        "programuotojas",
+        "scraping",
+        "analitikas",
+        "automatikos",
+    ),
+    "cvmarket": (
         "AI automation",
         "dirbtinio intelekto",
         "Power Automate",
@@ -118,7 +128,7 @@ PRESETS = (
     SearchPreset(
         name="Quick start",
         description="Small remote scan with source-specific keywords.",
-        sources=("cvbankas", "hh", "justjoin"),
+        sources=("cvbankas", "cvmarket", "hh", "justjoin"),
         keywords=QUICK_START_KEYWORDS,
         source_keywords=QUICK_START_SOURCE_KEYWORDS,
         limit=10,
@@ -131,9 +141,9 @@ PRESETS = (
         use_config_keywords=True,
     ),
     SearchPreset(
-        name="CVbankas AI automation",
+        name="Lithuanian AI automation",
         description="Lithuanian and English AI automation roles.",
-        sources=("cvbankas",),
+        sources=("cvbankas", "cvmarket"),
         keywords=(
             "dirbtinio intelekto",
             "dirbtinio intelekto sprendimu inzinierius",
@@ -189,7 +199,7 @@ PRESETS = (
     SearchPreset(
         name="Tools stack",
         description="Search by tools and platforms instead of position titles.",
-        sources=("cvbankas", "hh", "startup_jobs", "justjoin", "euremotejobs"),
+        sources=("cvbankas", "cvmarket", "hh", "startup_jobs", "justjoin", "euremotejobs"),
         keywords=(
             "n8n",
             "Make.com",
