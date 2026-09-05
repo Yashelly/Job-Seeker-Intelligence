@@ -248,6 +248,7 @@ The app prefers `config/cvbankas.local.yaml`; TUI changes persist there. Per-sou
 | Source | ID | Collection | Notes |
 | --- | --- | --- | --- |
 | CVbankas | `cvbankas` | HTML parsing | Keyword search across office, hybrid, and remote vacancies |
+| CVMarket | `cvmarket` | HTML + JSON-LD | Lithuanian keyword search, newest-first pagination |
 | CV-Online | `cvonline` | Public feed | All work modes, unfiltered newest-first feed |
 | HH.ru | `hh` | Playwright | Remote roles, throttled |
 | JustJoin.it | `justjoin` | HTML parsing | EN automation/AI/tooling |
