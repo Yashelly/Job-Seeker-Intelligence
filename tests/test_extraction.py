@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from cvbankas_tracker.ai_fallback import AIProviderState
 from cvbankas_tracker.extraction import VacancyAIEnrichmentService
 from cvbankas_tracker.main import build_extraction_service
 from cvbankas_tracker.models import Vacancy
@@ -21,6 +22,10 @@ class StubExtractionClient:
             "responsibilities": ["Build automations", "Maintain APIs"],
             "notes": "Stub extraction",
         }
+
+
+class QuotaError(RuntimeError):
+    code = "insufficient_quota"
 
 
 class VacancyAIEnrichmentTests(unittest.TestCase):
@@ -74,6 +79,32 @@ class VacancyAIEnrichmentTests(unittest.TestCase):
         self.assertEqual(enriched.salary_text, "2500 EUR")
         self.assertEqual(enriched.requirements, ["Python"])
         self.assertEqual(enriched.responsibilities, ["Build services"])
+
+    def test_quota_error_preserves_parser_data_and_opens_circuit(self) -> None:
+        class FailingClient:
+            calls = 0
+
+            def extract(self, vacancy: Vacancy, visible_text: str) -> dict[str, object]:
+                self.calls += 1
+                raise QuotaError("provider response body must not be reported")
+
+        vacancy = Vacancy(
+            source_id="1-3",
+            source_url="https://example.test/1-3",
+            title="Python Developer",
+            company="Parser Company",
+            location="",
+            salary_text="",
+            raw_text="<html><body>Python role in Vilnius</body></html>",
+        )
+        client = FailingClient()
+        state = AIProviderState()
+        service = VacancyAIEnrichmentService(client, provider_state=state)
+
+        self.assertIs(service.enrich(vacancy), vacancy)
+        self.assertIs(service.enrich(vacancy), vacancy)
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(state.disabled_reason, "OpenAI API quota exhausted")
 
 
 if __name__ == "__main__":

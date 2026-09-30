@@ -9,6 +9,7 @@ from typing import Protocol
 from openai import OpenAI
 
 from .ai_cli import coerce_str_list, parse_json_response, run_claude_cli, run_codex_cli
+from .ai_fallback import AIProviderState, safe_ai_error_reason
 from .models import Vacancy
 
 EXTRACTION_SYSTEM_PROMPT = (
@@ -155,8 +156,14 @@ class VacancyAIEnrichmentService:
         "you will",
     )
 
-    def __init__(self, client: AIVacancyExtractionClient) -> None:
+    def __init__(
+        self,
+        client: AIVacancyExtractionClient,
+        *,
+        provider_state: AIProviderState | None = None,
+    ) -> None:
         self._client = client
+        self._provider_state = provider_state
 
     def enrich(self, vacancy: Vacancy) -> Vacancy:
         if not self._needs_enrichment(vacancy):
@@ -166,7 +173,19 @@ class VacancyAIEnrichmentService:
         if not visible_text:
             return vacancy
 
-        extracted = self._client.extract(vacancy, visible_text)
+        if self._provider_state and self._provider_state.disabled_reason:
+            return vacancy
+
+        try:
+            extracted = self._client.extract(vacancy, visible_text)
+        except Exception as error:
+            reason = (
+                self._provider_state.record_failure(error)
+                if self._provider_state
+                else safe_ai_error_reason(error)
+            )
+            print(f"[AI fallback] vacancy enrichment skipped | {reason}")
+            return vacancy
         return Vacancy(
             source_name=vacancy.source_name,
             source_id=vacancy.source_id,

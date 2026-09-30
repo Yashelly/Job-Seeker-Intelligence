@@ -16,6 +16,7 @@ from .ai_cli import (
     run_claude_cli,
     run_codex_cli,
 )
+from .ai_fallback import AIProviderState
 from .models import (
     CEFR_LEVELS,
     AnalysisMethod,
@@ -816,9 +817,24 @@ class AIBasedAnalysisStrategy(AnalysisStrategy):
 class VacancyAnalysisService:
     primary_strategy: AnalysisStrategy
     fallback_strategy: AnalysisStrategy | None = None
+    provider_state: AIProviderState | None = None
 
     def analyze(self, vacancy: Vacancy, profile: UserProfile) -> VacancyAnalysis:
         builder = VacancyAnalysisBuilder()
+        if (
+            self.fallback_strategy is not None
+            and self.provider_state is not None
+            and self.provider_state.disabled_reason
+        ):
+            self.fallback_strategy.populate_builder(builder, vacancy, profile)
+            self.provider_state.record_analysis_fallback()
+            marker = (
+                "[AI fallback] rule-based scoring used: "
+                f"{self.provider_state.disabled_reason}"
+            )
+            existing = builder.current_notes()
+            builder.with_notes(f"{marker} | {existing}" if existing else marker)
+            return builder.build()
         try:
             self.primary_strategy.populate_builder(builder, vacancy, profile)
             # build() is inside the try on purpose: a primary strategy can
@@ -833,10 +849,16 @@ class VacancyAnalysisService:
             # substituting a rule-based score (audit finding #7). The reason is
             # persisted in the analysis notes (durable, per-vacancy, visible in
             # the UI) and echoed once to stdout so it also lands in the job log.
-            reason = f"{type(error).__name__}: {error}".strip()[:200]
+            reason = (
+                self.provider_state.record_failure(error)
+                if self.provider_state
+                else f"{type(error).__name__}: {error}".strip()[:200]
+            )
             print(f"[AI fallback] primary analysis provider failed -> rule-based | {reason}")
             builder.reset()
             self.fallback_strategy.populate_builder(builder, vacancy, profile)
+            if self.provider_state:
+                self.provider_state.record_analysis_fallback()
             marker = f"[AI fallback] primary provider failed: {reason}"
             existing = builder.current_notes()
             builder.with_notes(f"{marker} | {existing}" if existing else marker)
