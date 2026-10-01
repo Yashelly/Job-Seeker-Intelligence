@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from cvbankas_tracker.ai_fallback import AIProviderState
 from cvbankas_tracker.analysis import (
     AIBasedAnalysisStrategy,
     RuleBasedAnalysisStrategy,
@@ -84,6 +85,28 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertEqual(analysis.analysis_method, AnalysisMethod.RULE_BASED)
         self.assertGreaterEqual(analysis.score, 60)
+
+    def test_disabled_provider_uses_rule_fallback_without_calling_ai(self) -> None:
+        class UnexpectedClient:
+            def analyze(self, vacancy: Vacancy, profile: UserProfile) -> dict[str, object]:
+                raise AssertionError("disabled provider should not be called")
+
+        class QuotaError(RuntimeError):
+            code = "insufficient_quota"
+
+        state = AIProviderState()
+        state.record_failure(QuotaError("quota response"))
+        service = VacancyAnalysisService(
+            primary_strategy=AIBasedAnalysisStrategy(UnexpectedClient()),
+            fallback_strategy=RuleBasedAnalysisStrategy(),
+            provider_state=state,
+        )
+
+        analysis = service.analyze(self.vacancy, self.profile)
+
+        self.assertEqual(analysis.analysis_method, AnalysisMethod.RULE_BASED)
+        self.assertEqual(state.analysis_fallback_count, 1)
+        self.assertIn("OpenAI API quota exhausted", analysis.notes)
 
     def test_rule_based_strategy_penalizes_excluded_roles(self) -> None:
         excluded_vacancy = Vacancy(

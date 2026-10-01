@@ -16,6 +16,7 @@ from pathlib import Path
 
 import yaml
 
+from .ai_fallback import AIProviderState
 from .analysis import (
     AIBasedAnalysisStrategy,
     ClaudeCLIAnalysisClient,
@@ -675,7 +676,12 @@ def _optional_env(name: str) -> str | None:
     return value or None
 
 
-def build_analysis_service(strategy_name: str, openai_model: str) -> VacancyAnalysisService:
+def build_analysis_service(
+    strategy_name: str,
+    openai_model: str,
+    *,
+    provider_state: AIProviderState | None = None,
+) -> VacancyAnalysisService:
     fallback = RuleBasedAnalysisStrategy()
     if strategy_name == "rule":
         return VacancyAnalysisService(primary_strategy=fallback)
@@ -696,6 +702,7 @@ def build_analysis_service(strategy_name: str, openai_model: str) -> VacancyAnal
     return VacancyAnalysisService(
         primary_strategy=AIBasedAnalysisStrategy(ai_client),
         fallback_strategy=fallback,
+        provider_state=provider_state,
     )
 
 
@@ -703,6 +710,7 @@ def build_extraction_service(
     openai_model: str,
     *,
     use_openai: bool = True,
+    provider_state: AIProviderState | None = None,
 ) -> VacancyAIEnrichmentService:
     backend = resolve_ai_backend() if use_openai else "demo"
     if backend == "claude_cli":
@@ -713,7 +721,7 @@ def build_extraction_service(
         client = OpenAIVacancyExtractionClient(model=openai_model)
     else:
         client = DemoAIVacancyExtractionClient()
-    return VacancyAIEnrichmentService(client)
+    return VacancyAIEnrichmentService(client, provider_state=provider_state)
 
 
 def parse_application_status(value: str) -> ApplicationStatus:
@@ -1405,6 +1413,7 @@ def _run_source_batch(
     profile: UserProfile,
     collection_run_id: int | None = None,
     control: JobControl | None = None,
+    provider_state: AIProviderState | None = None,
 ) -> SourceBatchResult:
     control = control or JobControl()
     result = SourceBatchResult(source_name=source.name, report_rows=[])
@@ -1414,8 +1423,13 @@ def _run_source_batch(
         extraction_service = build_extraction_service(
             args.openai_model,
             use_openai=args.analysis_strategy == "ai",
+            provider_state=provider_state,
         )
-        analysis_service = build_analysis_service(args.analysis_strategy, args.openai_model)
+        analysis_service = build_analysis_service(
+            args.analysis_strategy,
+            args.openai_model,
+            provider_state=provider_state,
+        )
         keywords: list[str | None] = resolve_source_search_keywords(source.name, args, cfg)
         if not getattr(source, "uses_search_keywords", True):
             # CV-Online exposes the full public listing in newest-first order;
@@ -1592,6 +1606,8 @@ def _send_telegram_batch_summary(
     source_results: list[SourceBatchResult],
     report_rows: list[tuple[Vacancy, VacancyAnalysis, ApplicationRecord | None]],
     recovered_count: int = 0,
+    ai_fallback_count: int = 0,
+    ai_fallback_reason: str | None = None,
 ) -> bool:
     source_names = list(
         dict.fromkeys(
@@ -1624,6 +1640,8 @@ def _send_telegram_batch_summary(
             failed_count=failed_count,
             source_errors=source_errors,
             recovered_count=recovered_count,
+            ai_fallback_count=ai_fallback_count,
+            ai_fallback_reason=ai_fallback_reason,
             max_vacancies=max_vacancies,
             notify_when_empty=notify_when_empty,
         )
@@ -1716,6 +1734,7 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
     source_results: list[SourceBatchResult] = []
     report_rows: list[tuple[Vacancy, VacancyAnalysis, ApplicationRecord | None]] = []
     run_error: BaseException | None = None
+    provider_state = AIProviderState()
     # Everything from here until the run is finalized must run under a guard that
     # releases the collection lease on *every* exit path -- normal, cancelled, an
     # unexpected source/prune exception, or even a KeyboardInterrupt -- otherwise
@@ -1740,6 +1759,7 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
                 profile=profile,
                 collection_run_id=collection_run.id,
                 control=control,
+                provider_state=provider_state,
             ),
         )
         report_rows = [
@@ -1821,6 +1841,8 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
             source_results=source_results,
             report_rows=summary_rows,
             recovered_count=recovered_count,
+            ai_fallback_count=provider_state.analysis_fallback_count,
+            ai_fallback_reason=provider_state.disabled_reason,
         )
         if notification_ok:
             try:

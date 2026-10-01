@@ -110,6 +110,42 @@ class TelegramNotificationTests(unittest.TestCase):
         self.assertIn("<b>Errors</b>", summary)
         self.assertIn("• hh: listing: blocked &lt;temporarily&gt;", summary)
 
+    def test_daily_summary_groups_quota_errors_without_provider_payload(self) -> None:
+        quota_error = (
+            "Error code: 429 - {'error': {'message': 'You have no credits remaining. "
+            "Add credits to continue using the API.', 'type': 'insufficient_quota'}}"
+        )
+        summary = build_daily_summary(
+            [],
+            source_names=["cvbankas"],
+            attempted_count=2,
+            failed_count=2,
+            source_errors=[
+                f"cvbankas: vacancy 1/2: {quota_error}",
+                f"cvbankas: vacancy 2/2: {quota_error}",
+            ],
+        )
+
+        self.assertIn("• cvbankas: OpenAI API quota exhausted (2 occurrences)", summary)
+        self.assertNotIn("no credits remaining", summary)
+        self.assertNotIn("Add credits", summary)
+
+    def test_daily_summary_reports_rule_based_fallback_once(self) -> None:
+        summary = build_daily_summary(
+            [],
+            source_names=["cvbankas"],
+            attempted_count=4,
+            failed_count=0,
+            ai_fallback_count=4,
+            ai_fallback_reason="OpenAI API quota exhausted",
+        )
+
+        self.assertIn(
+            "AI fallback: rule-based scoring used for <b>4</b> vacancies "
+            "(OpenAI API quota exhausted).",
+            summary,
+        )
+
     def test_daily_summary_labels_recovered_vacancies(self) -> None:
         summary = build_daily_summary(
             [],

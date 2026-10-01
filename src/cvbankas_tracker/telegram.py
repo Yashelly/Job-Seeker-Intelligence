@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -117,6 +118,8 @@ class TelegramNotifier:
         notify_when_empty: bool = False,
         source_errors: list[str] | None = None,
         recovered_count: int = 0,
+        ai_fallback_count: int = 0,
+        ai_fallback_reason: str | None = None,
     ) -> int:
         if not rows and not notify_when_empty and not source_errors:
             return 0
@@ -129,6 +132,8 @@ class TelegramNotifier:
             max_vacancies=max_vacancies,
             source_errors=source_errors,
             recovered_count=recovered_count,
+            ai_fallback_count=ai_fallback_count,
+            ai_fallback_reason=ai_fallback_reason,
         )
         return self.send_text(text)
 
@@ -241,6 +246,8 @@ def build_daily_summary(
     max_vacancies: int = 10,
     source_errors: list[str] | None = None,
     recovered_count: int = 0,
+    ai_fallback_count: int = 0,
+    ai_fallback_reason: str | None = None,
 ) -> str:
     sorted_rows = sorted(
         rows,
@@ -259,13 +266,26 @@ def build_daily_summary(
     if recovered_count:
         lines.insert(3, f"Recovered after interrupted run: <b>{recovered_count}</b>")
 
+    if ai_fallback_count:
+        reason = html.escape(ai_fallback_reason or "AI provider unavailable")
+        lines.extend(
+            [
+                "",
+                (
+                    "AI fallback: rule-based scoring used for "
+                    f"<b>{ai_fallback_count}</b> vacancies ({reason})."
+                ),
+            ]
+        )
+
     if source_errors:
-        visible_errors = source_errors[:8]
+        grouped_errors = _group_source_errors(source_errors)
+        visible_errors = grouped_errors[:5]
         lines.extend(["", "<b>Errors</b>"])
         lines.extend(f"• {html.escape(error)}" for error in visible_errors)
-        hidden_error_count = len(source_errors) - len(visible_errors)
+        hidden_error_count = len(grouped_errors) - len(visible_errors)
         if hidden_error_count > 0:
-            lines.append(f"• Plus {hidden_error_count} more error(s) in the local log.")
+            lines.append(f"• Plus {hidden_error_count} more error type(s) in the local log.")
 
     if not sorted_rows:
         lines.extend(["", "No new matching vacancies today."])
@@ -293,6 +313,31 @@ def build_daily_summary(
     if hidden_count > 0:
         lines.extend(["", f"Plus {hidden_count} more new vacancies in the local report."])
     return "\n".join(lines)
+
+
+def _group_source_errors(source_errors: list[str]) -> list[str]:
+    grouped: dict[str, int] = {}
+    for error in source_errors:
+        normalized = " ".join(error.split())
+        lowered = normalized.lower()
+        if "insufficient_quota" in lowered or "no credits remaining" in lowered:
+            source = normalized.split(":", 1)[0].strip() or "unknown source"
+            normalized = f"{source}: OpenAI API quota exhausted"
+        else:
+            normalized = re.sub(
+                r"^(.*?:\s*)vacancy\s+\d+/\d+:\s*",
+                r"\1vacancy: ",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            if len(normalized) > 180:
+                normalized = f"{normalized[:177].rstrip()}..."
+        grouped[normalized] = grouped.get(normalized, 0) + 1
+
+    return [
+        f"{message} ({count} occurrences)" if count > 1 else message
+        for message, count in grouped.items()
+    ]
 
 
 def split_telegram_text(text: str, limit: int = DEFAULT_CHUNK_LIMIT) -> list[str]:
