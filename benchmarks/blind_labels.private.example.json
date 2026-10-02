@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "cases_sha256": "replace-with-the-SHA-256-of-blind_inputs.json",
+  "labels": {
+    "deduplication": [],
+    "relevance": [],
+    "work_mode": [],
+    "eligibility": [],
+    "seniority": []
+  }
+}

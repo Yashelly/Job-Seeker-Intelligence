@@ -31,10 +31,10 @@ MAX_DAILY_ATTEMPTS = 3
 # by the web layer so this module stays free of FastAPI / run_batch imports.
 Runner = Callable[["ScheduleConfig"], int]
 # Resolves a started job id to its current job status
-# ("running" | "paused" | "done" | "error" | "cancelled"), or ``None`` if the job
-# is unknown (e.g. the process restarted and the in-memory job is gone). Injected
-# so the scheduler can confirm a run actually *succeeded* rather than merely
-# starting -- otherwise a job that fails after launch is recorded as a done day.
+# ("running" | "paused" | "done" | "partial" | "error" | "cancelled"), or
+# ``None`` if the job is unknown (e.g. the process restarted and the in-memory
+# job is gone). Injected so the scheduler can confirm a run actually reached a
+# terminal outcome rather than merely starting.
 OutcomeGetter = Callable[[int], str | None]
 
 
@@ -255,9 +255,10 @@ class DailyScheduler:
 
         When an ``outcome_getter`` is configured, a started job's ``last_run_date``
         (the one-run-per-day guard) is committed only once its terminal status
-        confirms success. A job that fails *after* launching is recorded as
-        ``failed`` and retried, bounded by ``MAX_DAILY_ATTEMPTS`` -- rather than
-        being silently treated as a completed day (audit finding #5).
+        confirms a completed or partial day. A job that fails *after* launching
+        is recorded as ``failed`` and retried, bounded by ``MAX_DAILY_ATTEMPTS``
+        -- rather than being silently treated as a completed day (audit finding
+        #5).
         """
         moment = now or self._clock()
         today = moment.date().isoformat()
@@ -325,10 +326,10 @@ class DailyScheduler:
     def _resolve_pending_locked(self, moment: datetime, today: str) -> bool:
         """Resolve the previously-started job. Returns False while still in flight.
 
-        Caller holds ``self._lock``. ``done`` confirms the day; ``cancelled``
-        records a user abort (no auto-retry today); anything else -- including a
-        job lost to a process restart (``None``) -- is a failure that leaves
-        ``last_run_date`` unset so a bounded retry can fire.
+        Caller holds ``self._lock``. ``done`` and ``partial`` confirm the day;
+        ``cancelled`` records a user abort (no auto-retry today); anything else
+        -- including a job lost to a process restart (``None``) -- is a failure
+        that leaves ``last_run_date`` unset so a bounded retry can fire.
         """
         assert self._outcome_getter is not None
         job_id = self._config.last_job_id
@@ -339,6 +340,9 @@ class DailyScheduler:
         if outcome == "done":
             self._config.last_run_date = today
             self._config.last_status = "completed"
+        elif outcome == "partial":
+            self._config.last_run_date = today
+            self._config.last_status = "partial"
         elif outcome == "cancelled":
             self._config.last_run_date = today  # aborted by user; don't auto-retry today
             self._config.last_status = "cancelled"

@@ -12,14 +12,22 @@ from cvbankas_tracker.models import (
     AnalysisMethod,
     ApplicationRecord,
     ApplicationStatus,
+    ApplicationStatusEventKind,
+    ApplicationStatusOrigin,
     FitLabel,
+    InboxPreferences,
     Vacancy,
     VacancyAnalysis,
 )
 from cvbankas_tracker.storage import (
     DatabaseManager,
     DatabaseMigrationError,
+    _add_utc_hours,
+    _merged_application_for_urls,
+    _merged_lifecycle_for_rows,
     bootstrap_database,
+    canonicalize_source_url,
+    project_entrypoint_dir,
     resolve_database_path,
 )
 
@@ -378,6 +386,212 @@ def _analysis(url: str, score: int) -> VacancyAnalysis:
 
 
 class AutoSaveAndPruneTests(unittest.TestCase):
+    def test_exact_reprocessed_analysis_is_idempotent_but_changed_analysis_is_retained(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(Path(tmp) / "idempotent.db")
+            db.initialize()
+            url = "https://example.test/idempotent"
+            first_id, _ = db.save_processed_vacancy(
+                vacancy=_vac(url, "1"), analysis=_analysis(url, 50)
+            )
+            duplicate_id, _ = db.save_processed_vacancy(
+                vacancy=_vac(url, "1"), analysis=_analysis(url, 50)
+            )
+            changed_id, _ = db.save_processed_vacancy(
+                vacancy=_vac(url, "1"), analysis=_analysis(url, 55)
+            )
+            with db.connection() as connection:
+                analysis_count = connection.execute("SELECT COUNT(*) FROM analyses").fetchone()[0]
+            self.assertEqual(first_id, duplicate_id)
+            self.assertNotEqual(first_id, changed_id)
+            self.assertEqual(analysis_count, 2)
+            db.close()
+
+
+class StorageValidationCoverageTests(unittest.TestCase):
+    def test_path_and_url_boundary_normalization(self) -> None:
+        root = project_entrypoint_dir()
+        self.assertTrue((root / "main.py").is_file())
+        self.assertEqual(
+            resolve_database_path("jobs.db", config_path="config/settings.yaml"),
+            (root / "config" / "jobs.db").resolve(),
+        )
+        self.assertEqual(resolve_database_path("jobs.db"), (root / "jobs.db").resolve())
+        self.assertEqual(
+            resolve_database_path("jobs.db", entrypoint_dir="runtime"),
+            (root / "runtime" / "jobs.db").resolve(),
+        )
+        self.assertEqual(canonicalize_source_url("relative/path"), "relative/path")
+        self.assertEqual(
+            canonicalize_source_url("https://EXAMPLE.test:8443/job/?utm_source=x"),
+            "https://example.test:8443/job",
+        )
+
+    def test_recovery_reaps_a_run_with_an_unparseable_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(Path(tmp) / "recovery.db")
+            db.initialize()
+            run = db.begin_collection_run()
+            with db.transaction() as connection:
+                connection.execute(
+                    "UPDATE collection_runs SET started_at = ? WHERE id = ?",
+                    ("not-an-instant", run.id),
+                )
+
+            self.assertEqual(db.recover_stranded_collection_runs(older_than_seconds=60), 1)
+            self.assertEqual(db.get_collection_run(run.id).status, "failed")
+            db.close()
+
+    def test_action_item_validation_and_open_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(Path(tmp) / "actions.db")
+            db.initialize()
+            url = "https://example.test/action"
+            db.save_vacancy(_vac(url, "action"))
+
+            with self.assertRaisesRegex(ValueError, "title is required"):
+                db.create_action_item(vacancy_source_url=url, title="  ")
+            with self.assertRaisesRegex(ValueError, "Vacancy not found"):
+                db.create_action_item(
+                    vacancy_source_url="https://example.test/missing",
+                    title="Follow up",
+                )
+            with self.assertRaisesRegex(ValueError, "title is required"):
+                db.update_action_item(999, title="  ")
+            with self.assertRaisesRegex(ValueError, "Action not found"):
+                db.update_action_item(999, title="Follow up")
+            with self.assertRaisesRegex(ValueError, "Action not found"):
+                db.complete_action_item(999)
+            with self.assertRaisesRegex(ValueError, "Action not found"):
+                db.reopen_action_item(999)
+
+            action = db.create_action_item(vacancy_source_url=url, title="Follow up")
+            db.complete_action_item(action.id)
+            self.assertEqual(db.list_action_items(include_completed=False), [])
+            db.close()
+
+    def test_inbox_preference_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(Path(tmp) / "inbox-validation.db")
+            db.initialize()
+            with self.assertRaisesRegex(ValueError, "sort_by"):
+                db.save_inbox_preferences(InboxPreferences(sort_by="invalid"))
+            with self.assertRaisesRegex(ValueError, "fit_label"):
+                db.save_inbox_preferences(InboxPreferences(fit_label="Excellent"))
+            with self.assertRaisesRegex(ValueError, "application_status"):
+                db.save_inbox_preferences(InboxPreferences(application_status="Unknown"))
+            db.close()
+
+    def test_migration_merge_helpers_preserve_fallback_run_ids(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT '2026-01-01T00:00:00Z' AS first_seen_at,
+                   NULL AS first_seen_run_id,
+                   '2026-03-01T00:00:00Z' AS last_seen_at,
+                   NULL AS last_seen_run_id
+            UNION ALL
+            SELECT '2026-02-01T00:00:00Z', 7, '2026-02-01T00:00:00Z', 9
+            """
+        ).fetchall()
+
+        merged = _merged_lifecycle_for_rows(rows)
+
+        self.assertEqual(merged["first_seen_run_id"], 7)
+        self.assertEqual(merged["last_seen_run_id"], 9)
+        connection.close()
+
+    def test_empty_application_merge_and_naive_reminder_time(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.execute(
+            """
+            CREATE TABLE applications (
+                vacancy_source_url TEXT PRIMARY KEY,
+                analysis_id INTEGER,
+                status TEXT NOT NULL,
+                notes TEXT NOT NULL
+            )
+            """
+        )
+        self.assertIsNone(
+            _merged_application_for_urls(
+                connection,
+                ["https://example.test/missing"],
+                "https://example.test/missing",
+            )
+        )
+        self.assertEqual(
+            _add_utc_hours("2026-01-01T10:00:00", 2),
+            "2026-01-01T12:00:00Z",
+        )
+        connection.close()
+
+    def test_noop_and_not_found_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(Path(tmp) / "boundaries.db")
+            db.initialize()
+            with self.assertRaisesRegex(ValueError, "Invalid terminal"):
+                db.finish_collection_run(999, status="running")  # type: ignore[arg-type]
+            db.mark_telegram_summaries_delivered([])
+            self.assertFalse(db.record_vacancy_observation("https://example.test/missing", collection_run_id=None))
+            self.assertIsNone(db.get_latest_analysis("https://example.test/missing"))
+            self.assertIsNone(db.get_vacancy_by_source_id("missing"))
+            db.close()
+
+    def test_source_id_lookup_requires_source_when_ambiguous(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(Path(tmp) / "source-id.db")
+            db.initialize()
+            first = _vac("https://example.test/one", "shared")
+            first.source_name = "one"
+            second = _vac("https://example.test/two", "shared")
+            second.source_name = "two"
+            db.save_vacancy(first)
+            db.save_vacancy(second)
+            self.assertEqual(db.get_vacancy_by_source_id("shared", "one"), first)
+            self.assertIsNone(db.get_vacancy_by_source_id("shared", "missing"))
+            with self.assertRaisesRegex(ValueError, "exists in multiple sources"):
+                db.get_vacancy_by_source_id("shared")
+            db.close()
+
+    def test_application_status_validation_and_idempotent_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(Path(tmp) / "status.db")
+            db.initialize()
+            url = "https://example.test/status"
+            db.save_processed_vacancy(vacancy=_vac(url, "status"), analysis=_analysis(url, 50))
+            with self.assertRaisesRegex(ValueError, "Invalid application status origin"):
+                db.update_application_status_with_event(
+                    url, ApplicationStatus.SAVED, origin="invalid"  # type: ignore[arg-type]
+                )
+            with self.assertRaisesRegex(ValueError, "requires a reason"):
+                db.update_application_status_with_event(
+                    url,
+                    ApplicationStatus.SAVED,
+                    origin=ApplicationStatusOrigin.SYSTEM,
+                    kind=ApplicationStatusEventKind.CORRECTIVE,
+                )
+            with self.assertRaisesRegex(ValueError, "only accepted for corrective"):
+                db.update_application_status_with_event(
+                    url,
+                    ApplicationStatus.SAVED,
+                    origin=ApplicationStatusOrigin.SYSTEM,
+                    reason="not corrective",
+                )
+            with self.assertRaisesRegex(ValueError, "No application record"):
+                db.update_application_status_with_event(
+                    "https://example.test/missing",
+                    ApplicationStatus.SAVED,
+                    origin=ApplicationStatusOrigin.SYSTEM,
+                )
+            unchanged = db.update_application_status_with_event(
+                url, ApplicationStatus.SAVED, origin=ApplicationStatusOrigin.SYSTEM
+            )
+            self.assertEqual(unchanged.status, ApplicationStatus.SAVED)
+            db.close()
+
     def test_tracked_applications_are_sorted_by_match_descending(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db = DatabaseManager(Path(tmp) / "sorted.db")

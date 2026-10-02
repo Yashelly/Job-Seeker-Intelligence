@@ -11,7 +11,6 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-
 SPACE_RE = re.compile(r"\s+")
 TAG_RE = re.compile(r"<[^>]+>")
 SCRIPT_RE = re.compile(r"<script.*?</script>|<style.*?</style>", re.I | re.S)

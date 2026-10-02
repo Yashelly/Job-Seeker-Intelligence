@@ -52,10 +52,14 @@ class TuiHelperTests(unittest.TestCase):
         runner_args = build_runner_args(state, import_urls="https://example.com/job")
 
         self.assertEqual(state.selected_preset, "Quick start")
-        self.assertEqual(state.enabled_sources, ["cvbankas", "hh", "justjoin"])
+        self.assertEqual(state.enabled_sources, ["cvbankas", "cvmarket", "hh", "justjoin"])
         self.assertIn("dirbtinio intelekto", state.source_keywords["cvbankas"])
+        self.assertIn("dirbtinio intelekto", state.source_keywords["cvmarket"])
         self.assertEqual(state.limit, 10)
-        self.assertEqual(runner_args.enabled_sources, ["cvbankas", "hh", "justjoin"])
+        self.assertEqual(
+            runner_args.enabled_sources,
+            ["cvbankas", "cvmarket", "hh", "justjoin"],
+        )
         self.assertEqual(runner_args.import_urls, "https://example.com/job")
 
     def test_build_initial_state_preserves_resolved_absolute_db_across_cwds(self) -> None:

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "test_set_id": "blind-2026-01",
+  "profile": {
+    "name": "Candidate",
+    "target_roles": ["AI Automation Engineer"],
+    "skills": ["Python", "APIs"],
+    "preferred_locations": ["Remote", "Vilnius"],
+    "experience_level": "mid",
+    "years_of_experience": 2,
+    "additional_keywords": ["automation"],
+    "must_have_skills": ["Python"],
+    "nice_to_have_skills": [],
+    "excluded_keywords": [],
+    "max_english_level": "B2",
+    "work_modes": [{"mode": "remote", "country": ""}]
+  },
+  "cases": {
+    "deduplication": [],
+    "relevance": [],
+    "work_mode": [],
+    "eligibility": [],
+    "seniority": []
+  }
+}

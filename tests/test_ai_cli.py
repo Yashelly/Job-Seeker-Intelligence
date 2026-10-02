@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from cvbankas_tracker import ai_cli
 from cvbankas_tracker.ai_cli import (
     AICLIError,
+    coerce_score,
+    coerce_str_list,
     parse_json_response,
     run_claude_cli,
     run_codex_cli,
@@ -53,6 +55,22 @@ def _profile() -> UserProfile:
     )
 
 
+class CoercionTests(unittest.TestCase):
+    def test_score_coercion_clamps_and_rejects_boolean_or_unparseable_values(self) -> None:
+        self.assertEqual(coerce_score(True), 0)
+        self.assertEqual(coerce_score(88.9), 88)
+        self.assertEqual(coerce_score("score: 120%"), 100)
+        self.assertEqual(coerce_score("unknown", low=5), 5)
+
+    def test_string_list_coercion_handles_scalar_and_nested_values(self) -> None:
+        self.assertEqual(coerce_str_list(" Python "), ["Python"])
+        self.assertEqual(coerce_str_list(42), [])
+        self.assertEqual(
+            coerce_str_list([" Python ", None, {"bad": 1}, ["nested"], 7, ""]),
+            ["Python", "7"],
+        )
+
+
 class ParseJsonResponseTests(unittest.TestCase):
     def test_parses_plain_json(self) -> None:
         self.assertEqual(parse_json_response('{"score": 42}'), {"score": 42})
@@ -68,6 +86,12 @@ class ParseJsonResponseTests(unittest.TestCase):
     def test_raises_on_non_json(self) -> None:
         with self.assertRaises(AICLIError):
             parse_json_response("no json here at all")
+
+    def test_raises_on_malformed_embedded_json_and_non_object(self) -> None:
+        with self.assertRaisesRegex(AICLIError, "unparseable JSON"):
+            parse_json_response("prefix {broken: json} suffix")
+        with self.assertRaisesRegex(AICLIError, "not an object"):
+            parse_json_response('["valid", "but", "not", "an", "object"]')
 
 
 class RunClaudeCLITests(unittest.TestCase):
@@ -101,6 +125,27 @@ class RunClaudeCLITests(unittest.TestCase):
             with self.assertRaises(AICLIError):
                 run_claude_cli("prompt")
 
+    def test_wraps_missing_binary_timeout_and_malformed_envelope(self) -> None:
+        with patch.object(ai_cli.subprocess, "run", side_effect=FileNotFoundError):
+            with self.assertRaisesRegex(AICLIError, "not found"):
+                run_claude_cli("prompt")
+        with patch.object(
+            ai_cli.subprocess,
+            "run",
+            side_effect=ai_cli.subprocess.TimeoutExpired("claude", 3),
+        ):
+            with self.assertRaisesRegex(AICLIError, "timed out"):
+                run_claude_cli("prompt", timeout=3)
+        completed = MagicMock(returncode=0, stdout="not-json", stderr="")
+        with patch.object(ai_cli.subprocess, "run", return_value=completed):
+            with self.assertRaisesRegex(AICLIError, "unparseable output"):
+                run_claude_cli("prompt")
+
+    def test_returns_non_object_envelope_as_text(self) -> None:
+        completed = MagicMock(returncode=0, stdout='["answer"]', stderr="")
+        with patch.object(ai_cli.subprocess, "run", return_value=completed):
+            self.assertEqual(run_claude_cli("prompt"), "['answer']")
+
 
 class RunCodexCLITests(unittest.TestCase):
     def test_reads_output_last_message_file(self) -> None:
@@ -118,6 +163,22 @@ class RunCodexCLITests(unittest.TestCase):
         completed = MagicMock(returncode=2, stdout="", stderr="not logged in")
         with patch.object(ai_cli.subprocess, "run", return_value=completed):
             with self.assertRaises(AICLIError):
+                run_codex_cli("prompt")
+
+    def test_wraps_missing_binary_timeout_and_missing_output(self) -> None:
+        with patch.object(ai_cli.subprocess, "run", side_effect=FileNotFoundError):
+            with self.assertRaisesRegex(AICLIError, "not found"):
+                run_codex_cli("prompt")
+        with patch.object(
+            ai_cli.subprocess,
+            "run",
+            side_effect=ai_cli.subprocess.TimeoutExpired("codex", 4),
+        ):
+            with self.assertRaisesRegex(AICLIError, "timed out"):
+                run_codex_cli("prompt", timeout=4)
+        completed = MagicMock(returncode=0, stdout="events", stderr="")
+        with patch.object(ai_cli.subprocess, "run", return_value=completed):
+            with self.assertRaisesRegex(AICLIError, "no output file"):
                 run_codex_cli("prompt")
 
 

@@ -173,6 +173,10 @@ _REMOTE_TOKENS: tuple[str, ...] = (
     "nuotolinio",
     "nuotoliniu budu",
     "nuotoliniu būdu",
+    "work from anywhere",
+    "location independent",
+    "distributed team",
+    "home-based",
 )
 
 # Country -> match tokens (country name, local-language name, and major cities)
@@ -191,6 +195,7 @@ _COUNTRY_ALIASES: dict[str, tuple[str, ...]] = {
     "spain": ("spain", "españa", "espana", "madrid", "barcelona", "valencia"),
     "france": ("france", "paris", "lyon", "marseille"),
     "united kingdom": ("united kingdom", "uk", "england", "london", "manchester", "scotland"),
+    "united states": ("united states", "usa", "us", "u.s.", "america"),
     "ukraine": ("ukraine", "ukraina", "україна", "kyiv", "kiev", "lviv"),
     "sweden": ("sweden", "sverige", "stockholm", "gothenburg", "göteborg"),
     "finland": ("finland", "suomi", "helsinki", "espoo", "tampere"),
@@ -219,11 +224,69 @@ def _detect_vacancy_work_mode(searchable: str) -> str:
     Absent an explicit remote/hybrid signal a role is assumed on-site, which is
     the safe default for the on-site-heavy sources in use.
     """
+    searchable = searchable.lower()
+    # A negated arrangement is more informative than an incidental mention of
+    # "remote" or "hybrid" (for example, "remote work is not available").
+    office_patterns = (
+        r"\bremote(?: work)?\s+(?:is )?not (?:available|offered)\b",
+        r"\bno remote(?: work)?\b",
+        r"\bnot a hybrid role\b",
+        r"\bhybrid experience\b.*\b(?:on[ -]?site|office)\b",
+        r"\bthis role is on[ -]?site\b",
+        r"\b(?:fully )?on[ -]?site only\b",
+        r"\boffice[- ]first\b",
+        r"\bwork from (?:our )?office\b",
+    )
+    if (
+        ("not" in searchable or "no remote" in searchable or "office" in searchable or "on-site" in searchable)
+        and any(re.search(pattern, searchable) for pattern in office_patterns)
+    ):
+        return "office"
     if any(token in searchable for token in _HYBRID_TOKENS):
+        return "hybrid"
+    if "day" in searchable and "remote" in searchable and re.search(
+        r"\b(?:\d+|one|two|three|four|five)\s+days?\s+remote\b.*\b(?:\d+|one|two|three|four|five)\s+days?\s+(?:on[ -]?site|office)\b",
+        searchable,
+    ):
         return "hybrid"
     if any(token in searchable for token in _REMOTE_TOKENS):
         return "remote"
     return "office"
+
+
+def _profile_accepted_countries(profile: UserProfile) -> set[str]:
+    """Return explicit countries implied by the candidate's local preferences."""
+    countries = {
+        preference.country.strip().lower()
+        for preference in profile.work_modes
+        if preference.country.strip()
+    }
+    for country, aliases in _COUNTRY_ALIASES.items():
+        if any(location.lower() in aliases for location in profile.preferred_locations):
+            countries.add(country)
+    return countries
+
+
+def _remote_country_restriction_is_compatible(searchable: str, profile: UserProfile) -> bool:
+    """Reject a remote role explicitly limited to a country the profile excludes."""
+    restriction_language = (
+        "residents only",
+        "resident only",
+        "must be based",
+        "must reside",
+        "based in",
+        "reside in",
+        "country only",
+    )
+    if not any(phrase in searchable for phrase in restriction_language):
+        return True
+    accepted_countries = _profile_accepted_countries(profile)
+    if not accepted_countries:
+        return True
+    for country, aliases in _COUNTRY_ALIASES.items():
+        if any(re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", searchable) for alias in aliases):
+            return country in accepted_countries
+    return True
 
 
 def build_analysis_prompt_payload(vacancy: Vacancy, profile: UserProfile) -> dict[str, object]:
@@ -472,6 +535,15 @@ def _calculate_rule_based_components(
         score -= 40
         missing.append(f"Excluded profile keywords matched: {', '.join(excluded_matches)}")
 
+    # Explicit constraints must not be overridden by a strong keyword overlap.
+    if (
+        excluded_matches
+        or not english_ok
+        or not work_ok
+        or _has_material_experience_gap(vacancy, profile)
+    ):
+        score = min(score, 44)
+
     return max(0, min(100, score)), matched, missing
 
 
@@ -526,6 +598,12 @@ def _work_mode_match_score(vacancy: Vacancy, profile: UserProfile) -> tuple[int,
         if preference.mode != mode:
             continue
         if preference.mode == "remote":
+            if not _remote_country_restriction_is_compatible(searchable, profile):
+                return (
+                    -40,
+                    "Remote role has an explicit country-residency restriction outside your preferences.",
+                    False,
+                )
             return 10, "Remote role matches your work-mode preference.", True
         if not preference.country or _country_in_text(preference.country, searchable):
             where = preference.country or "your area"
@@ -595,13 +673,7 @@ def _experience_match_score(vacancy: Vacancy, profile: UserProfile) -> tuple[int
         return 0, ""
 
     searchable = vacancy.searchable_text
-    years_patterns = [
-        r"(\d+)\+?\s*(?:years|year)\b",
-        r"(\d+)\+?\s*(?:met(?:ų|u)?|m\.)\b",
-    ]
-    required_years: list[int] = []
-    for pattern in years_patterns:
-        required_years.extend(int(value) for value in re.findall(pattern, searchable))
+    required_years = _required_experience_years(searchable)
 
     inferred_seniority = _infer_vacancy_seniority(searchable)
     if required_years:
@@ -628,6 +700,31 @@ def _experience_match_score(vacancy: Vacancy, profile: UserProfile) -> tuple[int
     return -8, "Vacancy seniority appears higher than the current profile level."
 
 
+def _required_experience_years(searchable: str) -> list[int]:
+    # Most vacancy texts do not state a numeric experience requirement.  Let
+    # the regex engine make this inexpensive C-level fast-path check instead
+    # of iterating every character in Python on every deterministic analysis.
+    if re.search(r"\d", searchable) is None:
+        return []
+    years_patterns = (
+        r"(\d+)\+?\s*(?:years|year)\b",
+        r"(\d+)\+?\s*(?:met(?:ų|u)?|m\.)\b",
+    )
+    return [
+        int(value)
+        for pattern in years_patterns
+        for value in re.findall(pattern, searchable)
+    ]
+
+
+def _has_material_experience_gap(vacancy: Vacancy, profile: UserProfile) -> bool:
+    """Whether an explicit requirement exceeds the profile by at least 3 years."""
+    if profile.years_of_experience is None:
+        return False
+    required_years = _required_experience_years(vacancy.searchable_text)
+    return bool(required_years) and max(required_years) - profile.years_of_experience >= 3
+
+
 def _infer_profile_seniority(profile: UserProfile) -> int:
     if profile.years_of_experience is not None:
         if profile.years_of_experience >= 5:
@@ -645,11 +742,27 @@ def _infer_profile_seniority(profile: UserProfile) -> int:
 
 
 def _infer_vacancy_seniority(searchable: str) -> int:
-    if any(term in searchable for term in ("senior", "lead", "head", "principal")):
+    searchable = searchable.lower()
+    if not any(
+        marker in searchable
+        for marker in ("intern", "staff", "principal", "distinguished", "senior", "lead", "head", "mid", "middle", "junior", "graduate", "entry")
+    ):
+        return 0
+    if re.search(r"\b(?:seniority|senior level)\s+is not required\b", searchable):
+        return 0
+    if re.search(r"\bsenior\s+or\s+junior\b", searchable):
+        return 0
+    if re.search(r"\bintern(?:ship)?\b", searchable):
+        return -1
+    if re.search(r"\b(?:staff|principal|distinguished)\b", searchable):
+        return 4
+    if re.search(r"\b(?:senior|lead|head)\b", searchable) and not re.search(
+        r"\bnot a senior role\b", searchable
+    ):
         return 3
-    if any(term in searchable for term in ("mid", "middle")):
+    if re.search(r"\b(?:mid(?:-level)?|middle)\b", searchable):
         return 2
-    if any(term in searchable for term in ("junior", "entry-level", "entry level")):
+    if re.search(r"\b(?:junior|graduate|entry[- ]level)\b", searchable):
         return 1
     return 0
 

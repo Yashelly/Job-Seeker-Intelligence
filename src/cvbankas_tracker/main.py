@@ -44,6 +44,7 @@ from .models import (
     VacancyAnalysis,
 )
 from .sources import VacancySource, resolve_sources
+from .sources.base import CollectionCancelledError
 from .storage import (
     CollectionRunAlreadyActive,
     DatabaseManager,
@@ -223,9 +224,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        choices=("live", "sample", "cvbankas", "cvonline"),
+        choices=("live", "sample", "cvbankas", "cvmarket", "cvonline", "careers"),
         default="live",
-        help="Legacy single-source selector: live/cvbankas or local sample fixtures.",
+        help="Legacy single-source selector for one configured vacancy provider.",
     )
     parser.add_argument(
         "--sources",
@@ -631,9 +632,15 @@ def resolve_source_search_keywords(
     return list(args.search_keywords)
 
 
-def resolve_source_options(cfg: dict) -> dict:
+def resolve_source_options(cfg: dict, db_path: str | Path | None = None) -> dict:
     options = _cfg_get(cfg, "sources", "options", default={})
-    return options if isinstance(options, dict) else {}
+    resolved = dict(options) if isinstance(options, dict) else {}
+    if db_path is not None:
+        careers_options = resolved.get("careers", {})
+        if not isinstance(careers_options, dict):
+            careers_options = {}
+        resolved["careers"] = {**careers_options, "db_path": str(db_path)}
+    return resolved
 
 
 def close_source_resources(sources: Iterable[VacancySource]) -> None:
@@ -1324,6 +1331,12 @@ def _process_vacancy_url(
     title: str,
     collection_run_id: int | None = None,
 ) -> bool:
+    validate_url = getattr(source, "validate_vacancy_url", None)
+    if callable(validate_url):
+        validate_url(url)
+    revision_for = getattr(source, "career_source_revision_for", None)
+    guard = revision_for(url) if callable(revision_for) else None
+    persistence_options = {"career_source_revision": guard} if guard is not None else {}
     canonical_url = canonicalize_source_url(url)
     if not args.refresh and database.has_vacancy(canonical_url):
         database.record_vacancy_observation(
@@ -1331,6 +1344,7 @@ def _process_vacancy_url(
             collection_run_id=collection_run_id,
             source_name=source.name,
             original_source_url=url,
+            **persistence_options,
         )
         print(safe_console_text(f"[{ts()}] {title} SKIP | already processed | {canonical_url}"))
         return False
@@ -1361,6 +1375,7 @@ def _process_vacancy_url(
         application_note=f"Created during the Job Seeker CLI run from {source.name}.",
         auto_save=getattr(args, "auto_save", True),
         auto_save_threshold=getattr(args, "auto_save_threshold", 0),
+        **persistence_options,
     )
     report_rows.append((vacancy, analysis, stored_application))
 
@@ -1402,6 +1417,18 @@ def _sleep_before_source_request(
         )
     )
     time.sleep(delay_seconds)
+
+
+def _before_source_listing_fetch(source: VacancySource, control: JobControl, page_url: str) -> None:
+    control.wait_if_paused()
+    if control.is_cancelled():
+        raise CollectionCancelledError("Collection cancelled.")
+    _sleep_before_source_request(
+        source,
+        delay_attribute="listing_request_delay_seconds",
+        label="listing",
+        url=page_url,
+    )
 
 
 def _run_source_batch(
@@ -1468,30 +1495,51 @@ def _run_source_batch(
                     keyword=keyword,
                     listing_url=args.listing_url,
                     max_pages=collection_max_pages,
-                    before_listing_fetch=lambda page_url: _sleep_before_source_request(
-                        source,
-                        delay_attribute="listing_request_delay_seconds",
-                        label="listing",
-                        url=page_url,
+                    before_listing_fetch=lambda page_url: _before_source_listing_fetch(
+                        source, control, page_url
                     ),
-                    stop_at_vacancy=stop_at_known,
+                    stop_at_vacancy=(
+                        stop_at_known
+                        if getattr(source, "supports_newest_first_stop", True)
+                        else None
+                    ),
                 )
+                source_collection_errors = list(getattr(source, "collection_errors", []) or [])
+                source_incomplete_reasons = list(
+                    getattr(source, "collection_incomplete_reasons", []) or []
+                )
+                if source_collection_errors or source_incomplete_reasons:
+                    result.failed_count += len(source_collection_errors) + len(source_incomplete_reasons)
+                    result.error_messages.extend(
+                        _source_error_message("listing", ValueError(message))
+                        for message in [*source_collection_errors, *source_incomplete_reasons]
+                    )
                 page_urls.extend(keyword_page_urls)
                 for vacancy_url in keyword_listing_urls:
                     # Source adapters stop at this boundary while paging. Keep
                     # the same guard here for simple/custom adapters that accept
                     # **kwargs but do not implement the callback themselves.
-                    if daily_run and database.has_vacancy(
-                        canonicalize_source_url(vacancy_url)
+                    if (
+                        daily_run
+                        and getattr(source, "supports_newest_first_stop", True)
+                        and database.has_vacancy(canonicalize_source_url(vacancy_url))
                     ):
                         break
                     if vacancy_url in seen_urls:
                         continue
                     seen_urls.add(vacancy_url)
                     listing_urls.append(vacancy_url)
-                    if not daily_run and len(listing_urls) >= args.limit:
+                    if (
+                        not daily_run
+                        and not getattr(source, "requires_complete_processing", False)
+                        and len(listing_urls) >= args.limit
+                    ):
                         break
-                if not daily_run and len(listing_urls) >= args.limit:
+                if (
+                    not daily_run
+                    and not getattr(source, "requires_complete_processing", False)
+                    and len(listing_urls) >= args.limit
+                ):
                     break
         except Exception as error:
             result.failed_count += 1
@@ -1510,6 +1558,17 @@ def _run_source_batch(
         else:
             new_listing_urls = listing_urls
         process_urls = new_listing_urls if daily_run else new_listing_urls[: args.limit]
+        if (
+            not daily_run
+            and getattr(source, "requires_complete_processing", False)
+            and len(new_listing_urls) > len(process_urls)
+        ):
+            message = (
+                f"{source.name} collected {len(new_listing_urls)} jobs but only "
+                f"{len(process_urls)} will be processed because --limit={args.limit}."
+            )
+            result.failed_count += 1
+            result.error_messages.append(_source_error_message("limit", ValueError(message)))
         source_limit = len(process_urls)
         print(
             f"[{ts()}] {source.name} batch started | pages={len(page_urls)} "
@@ -1522,6 +1581,14 @@ def _run_source_batch(
             if control.is_cancelled():
                 print(safe_console_text(f"[{ts()}] {source.name} search ended by user."))
                 break
+            before_processing = getattr(source, "before_vacancy_processing", None)
+            if callable(before_processing):
+                try:
+                    before_processing()
+                except RuntimeError as error:
+                    result.failed_count += 1
+                    result.error_messages.append(_source_error_message("processing budget", error))
+                    break
             result.attempted_count += 1
             try:
                 _process_vacancy_url(
@@ -1691,7 +1758,7 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
     sources = resolve_sources(
         args.enabled_sources,
         data_dir=data_dir,
-        source_options=resolve_source_options(cfg),
+        source_options=resolve_source_options(cfg, workspace / args.db),
     )
     if args.listing_url and len(sources) > 1:
         raise ValueError("--listing-url can only be used when exactly one source is enabled.")
@@ -1867,7 +1934,11 @@ def run_batch(args: argparse.Namespace, cfg: dict | None = None, *, control: Job
     print(f"Report written to: {report_path}")
     if not notification_ok:
         return 1
-    return 0 if summary_rows else 2
+    if terminal_status == "partial":
+        return 2
+    if terminal_status == "failed":
+        return 1
+    return 0
 
 
 def run_recover_command(args: argparse.Namespace) -> int:
@@ -1912,7 +1983,7 @@ def run_import(
     sources = resolve_sources(
         args.enabled_sources,
         data_dir=data_dir,
-        source_options=resolve_source_options(cfg),
+        source_options=resolve_source_options(cfg, workspace / args.db),
     )
     profile = ProfileFileReader().read(workspace / args.profile)
     extraction_service = build_extraction_service(

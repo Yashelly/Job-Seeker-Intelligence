@@ -41,7 +41,7 @@
     <fieldset>
       <legend>Sources</legend>
       {% for source in sources %}
-      <label class="inline"><input type="checkbox" name="source_{{ source }}" value="on"{% if source in schedule.sources %} checked{% endif %}> {{ source }}</label>
+      <label class="inline"><input type="checkbox" name="source_{{ source.name }}" value="on"{% if source.name in schedule.sources %} checked{% endif %}> {{ source.label }}</label>
       {% endfor %}
     </fieldset>
 

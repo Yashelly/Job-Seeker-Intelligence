@@ -1,0 +1,1473 @@
+{
+  "audit_schema_version": 1,
+  "generated_at_utc": "2026-09-13T18:43:57.631118+00:00",
+  "cases_sha256": "fc74cc9492d147bbeab85648a123ef793ac634422fa7e66163019d02d3496e81",
+  "environment": {
+    "python": "3.12.2",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel"
+  },
+  "repository": {
+    "implemented_sources": [
+      "cvbankas",
+      "cvmarket",
+      "cvonline",
+      "euremotejobs",
+      "hh",
+      "justjoin",
+      "sample",
+      "startup_jobs"
+    ],
+    "implemented_source_count_including_sample": 8,
+    "external_job_source_count": 7,
+    "registry_aliases": [
+      "eu_remote_jobs",
+      "hh_html",
+      "justjoin_it",
+      "startupjobs"
+    ],
+    "configured_enabled_sources": [
+      "cvbankas",
+      "cvmarket",
+      "hh",
+      "justjoin",
+      "startup_jobs",
+      "euremotejobs"
+    ],
+    "configured_enabled_source_count": 6,
+    "configured_browser_sources": [
+      "euremotejobs",
+      "hh",
+      "startup_jobs"
+    ],
+    "configured_browser_source_count": 3,
+    "external_source_type_counts": {
+      "browser": 3,
+      "api_or_feed": 4,
+      "other": 0
+    },
+    "source_metadata": {
+      "cvbankas": {
+        "type": "HTTP HTML",
+        "type_group": "api_feed",
+        "external": true
+      },
+      "cvmarket": {
+        "type": "HTTP HTML + JSON-LD",
+        "type_group": "api_feed",
+        "external": true
+      },
+      "cvonline": {
+        "type": "HTTP embedded JSON feed",
+        "type_group": "api_feed",
+        "external": true
+      },
+      "euremotejobs": {
+        "type": "browser (configured); HTTP fallback",
+        "type_group": "browser",
+        "external": true
+      },
+      "hh": {
+        "type": "browser (configured); HTTP fallback",
+        "type_group": "browser",
+        "external": true
+      },
+      "justjoin": {
+        "type": "HTTP HTML",
+        "type_group": "api_feed",
+        "external": true
+      },
+      "sample": {
+        "type": "local HTML fixtures",
+        "type_group": "other",
+        "external": false
+      },
+      "startup_jobs": {
+        "type": "browser (configured); HTTP fallback",
+        "type_group": "browser",
+        "external": true
+      }
+    },
+    "normalized_source_schemas": 1,
+    "model_providers": [
+      "OpenAI API",
+      "Claude CLI",
+      "Codex CLI"
+    ],
+    "model_provider_count": 3,
+    "model_backed_operations": [
+      "vacancy fit analysis",
+      "vacancy field enrichment",
+      "CV profile building"
+    ],
+    "model_backed_operation_count": 3,
+    "background_job_types": [
+      "daily",
+      "import",
+      "search"
+    ],
+    "background_job_type_count": 3,
+    "web_routes": 32,
+    "web_get_routes": 14,
+    "web_post_routes": 18,
+    "rendered_dashboard_workflows": [
+      "applications.html",
+      "job.html",
+      "profile.html",
+      "runs.html",
+      "schedule.html",
+      "search.html",
+      "settings.html",
+      "today.html",
+      "vacancies.html",
+      "vacancy_detail.html"
+    ],
+    "rendered_dashboard_workflow_count": 10,
+    "cli_options": 65,
+    "pipeline_stages": [
+      "source retrieval",
+      "parse and normalize",
+      "canonical identity/deduplication",
+      "optional AI enrichment",
+      "AI or deterministic fit evaluation",
+      "transactional persistence",
+      "dashboard/report/notification presentation"
+    ],
+    "pipeline_stage_count": 7,
+    "scheduler_state": {
+      "enabled": true,
+      "time": "19:00",
+      "last_run_date": "2026-09-11",
+      "last_status": "running",
+      "attempts": 1,
+      "sources": [
+        "cvonline",
+        "cvbankas",
+        "cvmarket",
+        "hh",
+        "startup_jobs",
+        "justjoin",
+        "euremotejobs"
+      ],
+      "limit": 10,
+      "max_pages": 1,
+      "analysis_strategy": "ai"
+    }
+  },
+  "tests": {
+    "test_files": 31,
+    "test_methods": 364,
+    "failure_scenario_name_proxy": 85,
+    "failure_proxy_definition": "test method name contains one of the fixed failure terms in this script",
+    "tests_per_file": {
+      "test_additional_sources.py": 16,
+      "test_ai_cli.py": 28,
+      "test_ai_output_validation.py": 16,
+      "test_analysis.py": 36,
+      "test_blind_evaluation.py": 1,
+      "test_collector.py": 4,
+      "test_cvmarket_source.py": 6,
+      "test_cvonline_source.py": 5,
+      "test_demo_mode.py": 3,
+      "test_dependency_pins.py": 2,
+      "test_extraction.py": 3,
+      "test_g002_lifecycle_inbox.py": 7,
+      "test_g003_pipeline_actions.py": 9,
+      "test_g004_tui_cli.py": 16,
+      "test_g005_web_dashboard.py": 15,
+      "test_hh_source.py": 12,
+      "test_lifecycle_hardening.py": 20,
+      "test_observability.py": 6,
+      "test_parallel_batch.py": 4,
+      "test_parser.py": 2,
+      "test_profile_builder.py": 17,
+      "test_run_timeline.py": 8,
+      "test_sources.py": 9,
+      "test_storage_and_io.py": 24,
+      "test_telegram.py": 14,
+      "test_telegram_outbox.py": 5,
+      "test_tracking.py": 3,
+      "test_tui.py": 12,
+      "test_web_frontend.py": 31,
+      "test_web_scheduler.py": 18,
+      "test_workflow.py": 12
+    },
+    "formal_unit_integration_e2e_markers": false
+  },
+  "active_database": {
+    "available": true,
+    "path": "config/job_seeker.db",
+    "size_bytes": 1378521088,
+    "tables": [
+      "action_items",
+      "analyses",
+      "application_status_events",
+      "applications",
+      "collection_run_leases",
+      "collection_run_observations",
+      "collection_runs",
+      "settings",
+      "telegram_summary_outbox",
+      "vacancies",
+      "vacancy_url_aliases"
+    ],
+    "table_count": 11,
+    "explicit_indexes": [
+      "idx_action_items_due_state",
+      "idx_action_items_vacancy",
+      "idx_analyses_score_fit",
+      "idx_analyses_vacancy_id",
+      "idx_application_status_events_vacancy",
+      "idx_applications_status",
+      "idx_collection_runs_status_finished",
+      "idx_observations_run_source",
+      "idx_telegram_summary_outbox_pending",
+      "idx_vacancies_lifecycle",
+      "idx_vacancies_source_name_id",
+      "idx_vacancies_source_score_lookup",
+      "idx_vacancy_url_aliases_canonical"
+    ],
+    "explicit_index_count": 13,
+    "row_counts": {
+      "action_items": 0,
+      "analyses": 2496,
+      "application_status_events": 783,
+      "applications": 782,
+      "collection_run_leases": 1,
+      "collection_run_observations": 2675,
+      "collection_runs": 38,
+      "settings": 3,
+      "telegram_summary_outbox": 14,
+      "vacancies": 2449,
+      "vacancy_url_aliases": 0
+    },
+    "vacancies_per_source": [
+      {
+        "source_name": "cvonline",
+        "vacancies": 1292,
+        "distinct_source_ids": 1292
+      },
+      {
+        "source_name": "justjoin",
+        "vacancies": 312,
+        "distinct_source_ids": 312
+      },
+      {
+        "source_name": "cvbankas",
+        "vacancies": 309,
+        "distinct_source_ids": 308
+      },
+      {
+        "source_name": "hh",
+        "vacancies": 262,
+        "distinct_source_ids": 262
+      },
+      {
+        "source_name": "startup_jobs",
+        "vacancies": 145,
+        "distinct_source_ids": 145
+      },
+      {
+        "source_name": "euremotejobs",
+        "vacancies": 85,
+        "distinct_source_ids": 85
+      },
+      {
+        "source_name": "cvmarket",
+        "vacancies": 44,
+        "distinct_source_ids": 44
+      }
+    ],
+    "run_statuses": {
+      "failed": 14,
+      "completed": 15,
+      "partial": 8,
+      "running": 1
+    },
+    "first_run": "2026-08-08T20:38:09Z",
+    "last_run": "2026-09-13T16:00:14Z",
+    "finished_run_count": 37,
+    "completed_run_streak": 12,
+    "usable_run_streak": 14,
+    "source_history": {
+      "cvbankas": {
+        "attempted": 885,
+        "failed": 151,
+        "observed": 734,
+        "saved": 666,
+        "pages": 1412,
+        "run_entries": 27,
+        "clean_run_entries": 23,
+        "clean_run_entry_rate": 0.8518518518518519
+      },
+      "cvmarket": {
+        "attempted": 1453,
+        "failed": 1453,
+        "observed": 0,
+        "saved": 0,
+        "pages": 1049,
+        "run_entries": 4,
+        "clean_run_entries": 0,
+        "clean_run_entry_rate": 0.0
+      },
+      "cvonline": {
+        "attempted": 3726,
+        "failed": 2402,
+        "observed": 1324,
+        "saved": 1324,
+        "pages": 50,
+        "run_entries": 14,
+        "clean_run_entries": 13,
+        "clean_run_entry_rate": 0.9285714285714286
+      },
+      "euremotejobs": {
+        "attempted": 33,
+        "failed": 3,
+        "observed": 30,
+        "saved": 30,
+        "pages": 493,
+        "run_entries": 13,
+        "clean_run_entries": 10,
+        "clean_run_entry_rate": 0.7692307692307693
+      },
+      "hh": {
+        "attempted": 110,
+        "failed": 11,
+        "observed": 109,
+        "saved": 56,
+        "pages": 12,
+        "run_entries": 22,
+        "clean_run_entries": 11,
+        "clean_run_entry_rate": 0.5
+      },
+      "justjoin": {
+        "attempted": 786,
+        "failed": 87,
+        "observed": 700,
+        "saved": 642,
+        "pages": 544,
+        "run_entries": 23,
+        "clean_run_entries": 17,
+        "clean_run_entry_rate": 0.7391304347826086
+      },
+      "startup_jobs": {
+        "attempted": 419,
+        "failed": 4,
+        "observed": 419,
+        "saved": 419,
+        "pages": 297,
+        "run_entries": 13,
+        "clean_run_entries": 9,
+        "clean_run_entry_rate": 0.6923076923076923
+      }
+    },
+    "latest_score_bands": {
+      "latest_analyses": 2449,
+      "score_ge_40": 661,
+      "score_ge_45": 304,
+      "score_ge_75": 20,
+      "ai_based_latest": 1915,
+      "rule_based_latest": 534
+    },
+    "repeat_observations_consolidated": 226,
+    "repeat_observation_reduction": 0.08448598130841121,
+    "exact_repeated_content_groups": {
+      "groups_count": 80,
+      "listings": 194,
+      "cross_source_groups": 0
+    },
+    "field_completeness": {
+      "source_name": {
+        "complete": 2449,
+        "total": 2449,
+        "percent": 1.0
+      },
+      "source_id": {
+        "complete": 2449,
+        "total": 2449,
+        "percent": 1.0
+      },
+      "source_url": {
+        "complete": 2449,
+        "total": 2449,
+        "percent": 1.0
+      },
+      "title": {
+        "complete": 2449,
+        "total": 2449,
+        "percent": 1.0
+      },
+      "company": {
+        "complete": 2449,
+        "total": 2449,
+        "percent": 1.0
+      },
+      "location": {
+        "complete": 1910,
+        "total": 2449,
+        "percent": 0.7799101674152715
+      },
+      "salary_text": {
+        "complete": 2060,
+        "total": 2449,
+        "percent": 0.8411596570028583
+      },
+      "raw_text": {
+        "complete": 2262,
+        "total": 2449,
+        "percent": 0.9236423029808085
+      },
+      "requirements_json": {
+        "complete": 2176,
+        "total": 2449,
+        "percent": 0.8885259289505921
+      },
+      "responsibilities_json": {
+        "complete": 2252,
+        "total": 2449,
+        "percent": 0.9195590036749693
+      }
+    }
+  },
+  "legacy_database": {
+    "available": true,
+    "path": "job_seeker.db",
+    "size_bytes": 2898685952,
+    "tables": [
+      "action_items",
+      "analyses",
+      "application_status_events",
+      "applications",
+      "collection_run_leases",
+      "collection_run_observations",
+      "collection_runs",
+      "settings",
+      "vacancies",
+      "vacancy_url_aliases"
+    ],
+    "table_count": 10,
+    "explicit_indexes": [
+      "idx_action_items_due_state",
+      "idx_action_items_vacancy",
+      "idx_analyses_score_fit",
+      "idx_analyses_vacancy_id",
+      "idx_application_status_events_vacancy",
+      "idx_applications_status",
+      "idx_collection_runs_status_finished",
+      "idx_observations_run_source",
+      "idx_vacancies_lifecycle",
+      "idx_vacancies_source_name_id",
+      "idx_vacancies_source_score_lookup",
+      "idx_vacancy_url_aliases_canonical"
+    ],
+    "explicit_index_count": 12,
+    "row_counts": {
+      "action_items": 0,
+      "analyses": 3662,
+      "application_status_events": 17,
+      "applications": 17,
+      "collection_run_leases": 0,
+      "collection_run_observations": 0,
+      "collection_runs": 0,
+      "settings": 0,
+      "vacancies": 2722,
+      "vacancy_url_aliases": 10
+    },
+    "vacancies_per_source": [
+      {
+        "source_name": "justjoin",
+        "vacancies": 1513,
+        "distinct_source_ids": 1513
+      },
+      {
+        "source_name": "hh",
+        "vacancies": 1140,
+        "distinct_source_ids": 1140
+      },
+      {
+        "source_name": "cvbankas",
+        "vacancies": 59,
+        "distinct_source_ids": 57
+      },
+      {
+        "source_name": "euremotejobs",
+        "vacancies": 10,
+        "distinct_source_ids": 10
+      }
+    ],
+    "run_statuses": {},
+    "first_run": null,
+    "last_run": null,
+    "finished_run_count": 0,
+    "completed_run_streak": 0,
+    "usable_run_streak": 0,
+    "source_history": {},
+    "latest_score_bands": {
+      "latest_analyses": 2722,
+      "score_ge_40": 1581,
+      "score_ge_45": 1416,
+      "score_ge_75": 317,
+      "ai_based_latest": 0,
+      "rule_based_latest": 2722
+    },
+    "repeat_observations_consolidated": 0,
+    "repeat_observation_reduction": 0.0,
+    "exact_repeated_content_groups": {
+      "groups_count": 214,
+      "listings": 486,
+      "cross_source_groups": 0
+    },
+    "field_completeness": {
+      "source_name": {
+        "complete": 2722,
+        "total": 2722,
+        "percent": 1.0
+      },
+      "source_id": {
+        "complete": 2722,
+        "total": 2722,
+        "percent": 1.0
+      },
+      "source_url": {
+        "complete": 2722,
+        "total": 2722,
+        "percent": 1.0
+      },
+      "title": {
+        "complete": 2722,
+        "total": 2722,
+        "percent": 1.0
+      },
+      "company": {
+        "complete": 2721,
+        "total": 2722,
+        "percent": 0.9996326230712711
+      },
+      "location": {
+        "complete": 2699,
+        "total": 2722,
+        "percent": 0.9915503306392358
+      },
+      "salary_text": {
+        "complete": 1357,
+        "total": 2722,
+        "percent": 0.4985304922850845
+      },
+      "raw_text": {
+        "complete": 2722,
+        "total": 2722,
+        "percent": 1.0
+      },
+      "requirements_json": {
+        "complete": 2606,
+        "total": 2722,
+        "percent": 0.9573842762674504
+      },
+      "responsibilities_json": {
+        "complete": 2708,
+        "total": 2722,
+        "percent": 0.9948567229977957
+      }
+    }
+  },
+  "logs": {
+    "files": {
+      "logs\\daily.log": {
+        "summary_lines": 50,
+        "first_summary": "2026-06-14 20:08:59",
+        "last_summary": "2026-08-07 19:17:32",
+        "processed": 21455,
+        "saved": 1859,
+        "failed": 600,
+        "ai_fallback_events": 0
+      },
+      "config\\job_logs\\job-1-daily.log": {
+        "summary_lines": 8,
+        "first_summary": "2026-09-01 20:31:46",
+        "last_summary": "2026-09-11 21:19:45",
+        "processed": 2159,
+        "saved": 468,
+        "failed": 1703,
+        "ai_fallback_events": 200
+      },
+      "config\\job_logs\\job-1-search.log": {
+        "summary_lines": 1,
+        "first_summary": "2026-09-05 15:54:27",
+        "last_summary": "2026-09-05 15:54:27",
+        "processed": 3904,
+        "saved": 1502,
+        "failed": 2402,
+        "ai_fallback_events": 77
+      },
+      "config\\job_logs\\job-2-daily.log": {
+        "summary_lines": 0,
+        "first_summary": null,
+        "last_summary": null,
+        "processed": 0,
+        "saved": 0,
+        "failed": 0,
+        "ai_fallback_events": 8
+      }
+    },
+    "deduplicated_summary_runs": 59,
+    "deduplicated_processed": 27518,
+    "deduplicated_saved": 3829,
+    "deduplicated_failed": 4705,
+    "ai_fallback_events": 285
+  },
+  "evaluations": {
+    "deduplication": {
+      "records": 20,
+      "expected_unique_groups": 11,
+      "predicted_unique_groups": 14,
+      "expected_duplicate_pairs": 10,
+      "predicted_duplicate_pairs": 7,
+      "true_positive_pairs": 7,
+      "false_positive_pairs": 0,
+      "missed_duplicate_pairs": 3,
+      "precision": 1.0,
+      "recall": 0.7,
+      "f1": 0.8235294117647058,
+      "raw_reduction": 0.30000000000000004,
+      "incorrect_merges": [],
+      "missed_pairs": [
+        [
+          "company-variant-1",
+          "company-variant-2"
+        ],
+        [
+          "cross-source-1",
+          "cross-source-2"
+        ],
+        [
+          "format-variant-1",
+          "format-variant-2"
+        ]
+      ]
+    },
+    "relevance": {
+      "cases": 20,
+      "correct": 20,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "true_positives": 10,
+      "true_negatives": 10,
+      "decision_threshold": "score >= 45 (Medium or High fit)",
+      "errors": [],
+      "results": [
+        {
+          "id": "rel-01",
+          "expected": true,
+          "predicted": true,
+          "score": 100
+        },
+        {
+          "id": "rel-02",
+          "expected": true,
+          "predicted": true,
+          "score": 100
+        },
+        {
+          "id": "rel-03",
+          "expected": true,
+          "predicted": true,
+          "score": 72
+        },
+        {
+          "id": "rel-04",
+          "expected": true,
+          "predicted": true,
+          "score": 100
+        },
+        {
+          "id": "rel-05",
+          "expected": true,
+          "predicted": true,
+          "score": 92
+        },
+        {
+          "id": "rel-06",
+          "expected": true,
+          "predicted": true,
+          "score": 72
+        },
+        {
+          "id": "rel-07",
+          "expected": true,
+          "predicted": true,
+          "score": 82
+        },
+        {
+          "id": "rel-08",
+          "expected": true,
+          "predicted": true,
+          "score": 89
+        },
+        {
+          "id": "rel-09",
+          "expected": true,
+          "predicted": true,
+          "score": 79
+        },
+        {
+          "id": "rel-10",
+          "expected": true,
+          "predicted": true,
+          "score": 78
+        },
+        {
+          "id": "nonrel-01",
+          "expected": false,
+          "predicted": false,
+          "score": 44
+        },
+        {
+          "id": "nonrel-02",
+          "expected": false,
+          "predicted": false,
+          "score": 44
+        },
+        {
+          "id": "nonrel-03",
+          "expected": false,
+          "predicted": false,
+          "score": 0
+        },
+        {
+          "id": "nonrel-04",
+          "expected": false,
+          "predicted": false,
+          "score": 20
+        },
+        {
+          "id": "nonrel-05",
+          "expected": false,
+          "predicted": false,
+          "score": 20
+        },
+        {
+          "id": "nonrel-06",
+          "expected": false,
+          "predicted": false,
+          "score": 44
+        },
+        {
+          "id": "nonrel-07",
+          "expected": false,
+          "predicted": false,
+          "score": 44
+        },
+        {
+          "id": "nonrel-08",
+          "expected": false,
+          "predicted": false,
+          "score": 44
+        },
+        {
+          "id": "nonrel-09",
+          "expected": false,
+          "predicted": false,
+          "score": 44
+        },
+        {
+          "id": "nonrel-10",
+          "expected": false,
+          "predicted": false,
+          "score": 39
+        }
+      ]
+    },
+    "work_mode": {
+      "cases": 18,
+      "correct": 18,
+      "accuracy": 1.0,
+      "confusion_matrix": {
+        "remote": {
+          "remote": 7,
+          "hybrid": 0,
+          "office": 0
+        },
+        "hybrid": {
+          "remote": 0,
+          "hybrid": 4,
+          "office": 0
+        },
+        "office": {
+          "remote": 0,
+          "hybrid": 0,
+          "office": 7
+        }
+      },
+      "errors": []
+    },
+    "eligibility": {
+      "cases": 12,
+      "correct": 12,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "true_positives": 6,
+      "true_negatives": 6,
+      "country_restriction_rejections": {
+        "correct": 2,
+        "cases": 2
+      },
+      "errors": []
+    },
+    "seniority": {
+      "cases": 18,
+      "correct": 18,
+      "exact_match_accuracy": 1.0,
+      "supported_output_labels": [
+        "intern",
+        "unknown",
+        "junior",
+        "mid",
+        "senior",
+        "staff_principal"
+      ],
+      "confusion_matrix": {
+        "intern": {
+          "intern": 2
+        },
+        "junior": {
+          "junior": 4
+        },
+        "mid": {
+          "mid": 3
+        },
+        "senior": {
+          "senior": 3
+        },
+        "staff_principal": {
+          "staff_principal": 3
+        },
+        "unknown": {
+          "unknown": 3
+        }
+      },
+      "errors": []
+    }
+  },
+  "fault_injection": {
+    "source_isolation": {
+      "single_source_scenarios": 7,
+      "single_source_scenarios_contained": 7,
+      "multi_source_scenarios": 4,
+      "multi_source_scenarios_contained": 4,
+      "single_results": [
+        {
+          "failed_source": "source_0",
+          "unaffected_preserved": true,
+          "failure_recorded": true,
+          "status": "partial"
+        },
+        {
+          "failed_source": "source_1",
+          "unaffected_preserved": true,
+          "failure_recorded": true,
+          "status": "partial"
+        },
+        {
+          "failed_source": "source_2",
+          "unaffected_preserved": true,
+          "failure_recorded": true,
+          "status": "partial"
+        },
+        {
+          "failed_source": "source_3",
+          "unaffected_preserved": true,
+          "failure_recorded": true,
+          "status": "partial"
+        },
+        {
+          "failed_source": "source_4",
+          "unaffected_preserved": true,
+          "failure_recorded": true,
+          "status": "partial"
+        },
+        {
+          "failed_source": "source_5",
+          "unaffected_preserved": true,
+          "failure_recorded": true,
+          "status": "partial"
+        },
+        {
+          "failed_source": "source_6",
+          "unaffected_preserved": true,
+          "failure_recorded": true,
+          "status": "partial"
+        }
+      ],
+      "multi_results": [
+        {
+          "failures": 2,
+          "expected_survivors": 5,
+          "preserved_survivors": 5,
+          "recorded_failures": 2,
+          "status": "partial"
+        },
+        {
+          "failures": 2,
+          "expected_survivors": 5,
+          "preserved_survivors": 5,
+          "recorded_failures": 2,
+          "status": "partial"
+        },
+        {
+          "failures": 4,
+          "expected_survivors": 3,
+          "preserved_survivors": 3,
+          "recorded_failures": 4,
+          "status": "partial"
+        },
+        {
+          "failures": 7,
+          "expected_survivors": 0,
+          "preserved_survivors": 0,
+          "recorded_failures": 7,
+          "status": "failed"
+        }
+      ]
+    },
+    "ai_analysis": {
+      "scenarios": 8,
+      "contained": 8,
+      "fallbacks": 6,
+      "stored_analyses": 8,
+      "invalid_stored_rows": 0,
+      "results": [
+        {
+          "scenario": "provider_unavailable",
+          "contained": true,
+          "fallback_used": true,
+          "stored_score": 68,
+          "stored_method": "rule_based"
+        },
+        {
+          "scenario": "timeout",
+          "contained": true,
+          "fallback_used": true,
+          "stored_score": 68,
+          "stored_method": "rule_based"
+        },
+        {
+          "scenario": "malformed_json",
+          "contained": true,
+          "fallback_used": true,
+          "stored_score": 68,
+          "stored_method": "rule_based"
+        },
+        {
+          "scenario": "empty_response",
+          "contained": true,
+          "fallback_used": true,
+          "stored_score": 68,
+          "stored_method": "rule_based"
+        },
+        {
+          "scenario": "non_object_response",
+          "contained": true,
+          "fallback_used": true,
+          "stored_score": 68,
+          "stored_method": "rule_based"
+        },
+        {
+          "scenario": "schema_invalid_values",
+          "contained": true,
+          "fallback_used": false,
+          "stored_score": 0,
+          "stored_method": "ai_based"
+        },
+        {
+          "scenario": "unexpected_extreme_values",
+          "contained": true,
+          "fallback_used": false,
+          "stored_score": 100,
+          "stored_method": "ai_based"
+        },
+        {
+          "scenario": "rate_limit",
+          "contained": true,
+          "fallback_used": true,
+          "stored_score": 68,
+          "stored_method": "rule_based"
+        }
+      ]
+    },
+    "concurrent_idempotency": {
+      "concurrent_attempts": 16,
+      "completed_attempts": 16,
+      "worker_count": 8,
+      "canonical_vacancy_rows": 1,
+      "analysis_rows": 1,
+      "application_rows": 1,
+      "initial_status_event_rows": 1,
+      "integrity_check": "ok",
+      "foreign_key_violations": 0,
+      "limitation": "Exact repeated analysis payloads reuse one row; changed analysis payloads are intentionally retained. Analysis is still performed before persistence."
+    }
+  },
+  "performance": {
+    "url_canonicalization_and_set_dedup": {
+      "runs": 7,
+      "operations_per_run": 50000,
+      "median_seconds": 0.43126320000737906,
+      "min_seconds": 0.3940095999860205,
+      "max_seconds": 0.6571330000006128,
+      "median_operations_per_second": 115938.48025786685,
+      "all_seconds": [
+        0.48602830001618713,
+        0.43126320000737906,
+        0.6145115000254009,
+        0.6571330000006128,
+        0.40154759999131784,
+        0.3940095999860205,
+        0.39994580001803115
+      ],
+      "input_urls": 50000,
+      "unique_urls": 5000
+    },
+    "deterministic_analysis": {
+      "runs": 7,
+      "operations_per_run": 20000,
+      "median_seconds": 0.7908863000047859,
+      "min_seconds": 0.6145491999923252,
+      "max_seconds": 1.1301092999929097,
+      "median_operations_per_second": 25288.085025469496,
+      "all_seconds": [
+        0.6823472999967635,
+        0.7908863000047859,
+        1.1301092999929097,
+        0.6790745999896899,
+        0.6145491999923252,
+        0.9577681999944616,
+        1.1285407000104897
+      ]
+    },
+    "analysis_plus_atomic_sqlite_persistence": {
+      "runs": 3,
+      "operations_per_run": 500,
+      "median_seconds": 7.375480499991681,
+      "min_seconds": 7.373196300002746,
+      "max_seconds": 7.6284459000162315,
+      "median_operations_per_second": 67.79219333581914,
+      "all_seconds": [
+        7.375480499991681,
+        7.6284459000162315,
+        7.373196300002746
+      ]
+    },
+    "inbox_query": {
+      "runs": 3,
+      "operations_per_run": 1,
+      "median_seconds": 0.01195939999888651,
+      "min_seconds": 0.009760199987795204,
+      "max_seconds": 0.012958300008904189,
+      "median_operations_per_second": 83.61623493595881,
+      "all_seconds": [
+        0.012958300008904189,
+        0.01195939999888651,
+        0.009760199987795204
+      ],
+      "rows_returned": 500,
+      "per_outer_run_median_of_queries": 25,
+      "warmup_queries_per_outer_run": 5
+    }
+  },
+  "web_search_performance": {
+    "method": "FastAPI TestClient POST /search/start -> background job polling -> GET /vacancies; real fixture parsing, rule analysis, SQLite persistence, and HTML rendering; no network/model calls",
+    "query_classes": 6,
+    "paired_repetitions_per_class": 5,
+    "total_observations": 60,
+    "overall": {
+      "observations": 60,
+      "p50_seconds": 1.1619330000103218,
+      "p95_seconds": 2.698324454999238,
+      "minimum_seconds": 0.18942040001275018,
+      "maximum_seconds": 3.4965062999981456,
+      "all_seconds": [
+        0.2186842999944929,
+        0.22327000001678243,
+        0.20221879999735393,
+        0.19969909999053925,
+        0.20033880000119098,
+        0.18942040001275018,
+        0.20197570000891574,
+        0.19657920001191087,
+        0.1999552999914158,
+        0.1952451000106521,
+        0.3523988999950234,
+        0.34066789998905733,
+        0.34678779999376275,
+        0.3457881000067573,
+        0.7191724000149406,
+        0.4777677000092808,
+        0.35500899999169633,
+        0.3364904999907594,
+        0.3522757000173442,
+        0.3307096999778878,
+        0.634949700004654,
+        0.6679855999827851,
+        0.664160099986475,
+        1.4280967999948189,
+        0.6472005000105128,
+        0.6288664999883622,
+        2.443347700027516,
+        0.7492923999961931,
+        0.6331351000117138,
+        0.6343111000023782,
+        1.2610679999925196,
+        1.1605412000208162,
+        1.2215228000131901,
+        2.1559343000117224,
+        1.2270916999841575,
+        1.1632626000209711,
+        1.8097187000093982,
+        1.1606033999996725,
+        1.2101884000003338,
+        1.1656905999989249,
+        2.618182300007902,
+        1.7876492000068538,
+        1.8829970000078902,
+        2.5981147999991663,
+        1.9608947999950033,
+        2.786374399991473,
+        2.0952632000262383,
+        3.4965062999981456,
+        2.0374127000104636,
+        1.7632651000167243,
+        1.814775800012285,
+        1.7669660999963526,
+        2.695335399999749,
+        1.7493918999971356,
+        1.895802899991395,
+        2.414346600009594,
+        1.8121032000053674,
+        2.7551164999895263,
+        1.8146606000082102,
+        1.797893600014504
+      ]
+    },
+    "cold": {
+      "observations": 30,
+      "p50_seconds": 1.215855600006762,
+      "p95_seconds": 2.5395067300167278,
+      "minimum_seconds": 0.1999552999914158,
+      "maximum_seconds": 2.695335399999749,
+      "all_seconds": [
+        0.2186842999944929,
+        0.20221879999735393,
+        0.20033880000119098,
+        0.20197570000891574,
+        0.1999552999914158,
+        0.3523988999950234,
+        0.34678779999376275,
+        0.7191724000149406,
+        0.35500899999169633,
+        0.3522757000173442,
+        0.634949700004654,
+        0.664160099986475,
+        0.6472005000105128,
+        2.443347700027516,
+        0.6331351000117138,
+        1.2610679999925196,
+        1.2215228000131901,
+        1.2270916999841575,
+        1.8097187000093982,
+        1.2101884000003338,
+        2.618182300007902,
+        1.8829970000078902,
+        1.9608947999950033,
+        2.0952632000262383,
+        2.0374127000104636,
+        1.814775800012285,
+        2.695335399999749,
+        1.895802899991395,
+        1.8121032000053674,
+        1.8146606000082102
+      ]
+    },
+    "warm": {
+      "observations": 30,
+      "p50_seconds": 1.1605723000102444,
+      "p95_seconds": 2.772308344990597,
+      "minimum_seconds": 0.18942040001275018,
+      "maximum_seconds": 3.4965062999981456,
+      "all_seconds": [
+        0.22327000001678243,
+        0.19969909999053925,
+        0.18942040001275018,
+        0.19657920001191087,
+        0.1952451000106521,
+        0.34066789998905733,
+        0.3457881000067573,
+        0.4777677000092808,
+        0.3364904999907594,
+        0.3307096999778878,
+        0.6679855999827851,
+        1.4280967999948189,
+        0.6288664999883622,
+        0.7492923999961931,
+        0.6343111000023782,
+        1.1605412000208162,
+        2.1559343000117224,
+        1.1632626000209711,
+        1.1606033999996725,
+        1.1656905999989249,
+        1.7876492000068538,
+        2.5981147999991663,
+        2.786374399991473,
+        3.4965062999981456,
+        1.7632651000167243,
+        1.7669660999963526,
+        1.7493918999971356,
+        2.414346600009594,
+        2.7551164999895263,
+        1.797893600014504
+      ]
+    },
+    "by_query_class": {
+      "simple": {
+        "cold": {
+          "observations": 5,
+          "p50_seconds": 0.20197570000891574,
+          "p95_seconds": 0.21539119999506512,
+          "minimum_seconds": 0.1999552999914158,
+          "maximum_seconds": 0.2186842999944929,
+          "all_seconds": [
+            0.2186842999944929,
+            0.20221879999735393,
+            0.20033880000119098,
+            0.20197570000891574,
+            0.1999552999914158
+          ]
+        },
+        "warm": {
+          "observations": 5,
+          "p50_seconds": 0.19657920001191087,
+          "p95_seconds": 0.21855582001153379,
+          "minimum_seconds": 0.18942040001275018,
+          "maximum_seconds": 0.22327000001678243,
+          "all_seconds": [
+            0.22327000001678243,
+            0.19969909999053925,
+            0.18942040001275018,
+            0.19657920001191087,
+            0.1952451000106521
+          ]
+        },
+        "keyword_count": 1,
+        "cold_result_rows": 10
+      },
+      "normal": {
+        "cold": {
+          "observations": 5,
+          "p50_seconds": 0.3523988999950234,
+          "p95_seconds": 0.6463397200102917,
+          "minimum_seconds": 0.34678779999376275,
+          "maximum_seconds": 0.7191724000149406,
+          "all_seconds": [
+            0.3523988999950234,
+            0.34678779999376275,
+            0.7191724000149406,
+            0.35500899999169633,
+            0.3522757000173442
+          ]
+        },
+        "warm": {
+          "observations": 5,
+          "p50_seconds": 0.34066789998905733,
+          "p95_seconds": 0.4513717800087761,
+          "minimum_seconds": 0.3307096999778878,
+          "maximum_seconds": 0.4777677000092808,
+          "all_seconds": [
+            0.34066789998905733,
+            0.3457881000067573,
+            0.4777677000092808,
+            0.3364904999907594,
+            0.3307096999778878
+          ]
+        },
+        "keyword_count": 2,
+        "cold_result_rows": 18
+      },
+      "multi_constraint": {
+        "cold": {
+          "observations": 5,
+          "p50_seconds": 0.6472005000105128,
+          "p95_seconds": 2.087510180019308,
+          "minimum_seconds": 0.6331351000117138,
+          "maximum_seconds": 2.443347700027516,
+          "all_seconds": [
+            0.634949700004654,
+            0.664160099986475,
+            0.6472005000105128,
+            2.443347700027516,
+            0.6331351000117138
+          ]
+        },
+        "warm": {
+          "observations": 5,
+          "p50_seconds": 0.6679855999827851,
+          "p95_seconds": 1.2923359199950935,
+          "minimum_seconds": 0.6288664999883622,
+          "maximum_seconds": 1.4280967999948189,
+          "all_seconds": [
+            0.6679855999827851,
+            1.4280967999948189,
+            0.6288664999883622,
+            0.7492923999961931,
+            0.6343111000023782
+          ]
+        },
+        "keyword_count": 4,
+        "cold_result_rows": 34
+      },
+      "complex": {
+        "cold": {
+          "observations": 5,
+          "p50_seconds": 1.2270916999841575,
+          "p95_seconds": 1.6999885600060223,
+          "minimum_seconds": 1.2101884000003338,
+          "maximum_seconds": 1.8097187000093982,
+          "all_seconds": [
+            1.2610679999925196,
+            1.2215228000131901,
+            1.2270916999841575,
+            1.8097187000093982,
+            1.2101884000003338
+          ]
+        },
+        "warm": {
+          "observations": 5,
+          "p50_seconds": 1.1632626000209711,
+          "p95_seconds": 1.9578855600091627,
+          "minimum_seconds": 1.1605412000208162,
+          "maximum_seconds": 2.1559343000117224,
+          "all_seconds": [
+            1.1605412000208162,
+            2.1559343000117224,
+            1.1632626000209711,
+            1.1606033999996725,
+            1.1656905999989249
+          ]
+        },
+        "keyword_count": 8,
+        "cold_result_rows": 66
+      },
+      "adversarial": {
+        "cold": {
+          "observations": 5,
+          "p50_seconds": 2.0374127000104636,
+          "p95_seconds": 2.513598480011569,
+          "minimum_seconds": 1.8829970000078902,
+          "maximum_seconds": 2.618182300007902,
+          "all_seconds": [
+            2.618182300007902,
+            1.8829970000078902,
+            1.9608947999950033,
+            2.0952632000262383,
+            2.0374127000104636
+          ]
+        },
+        "warm": {
+          "observations": 5,
+          "p50_seconds": 2.5981147999991663,
+          "p95_seconds": 3.3544799199968107,
+          "minimum_seconds": 1.7632651000167243,
+          "maximum_seconds": 3.4965062999981456,
+          "all_seconds": [
+            1.7876492000068538,
+            2.5981147999991663,
+            2.786374399991473,
+            3.4965062999981456,
+            1.7632651000167243
+          ]
+        },
+        "keyword_count": 12,
+        "cold_result_rows": 98
+      },
+      "profile_driven": {
+        "cold": {
+          "observations": 5,
+          "p50_seconds": 1.814775800012285,
+          "p95_seconds": 2.535428899998078,
+          "minimum_seconds": 1.8121032000053674,
+          "maximum_seconds": 2.695335399999749,
+          "all_seconds": [
+            1.814775800012285,
+            2.695335399999749,
+            1.895802899991395,
+            1.8121032000053674,
+            1.8146606000082102
+          ]
+        },
+        "warm": {
+          "observations": 5,
+          "p50_seconds": 1.797893600014504,
+          "p95_seconds": 2.68696251999354,
+          "minimum_seconds": 1.7493918999971356,
+          "maximum_seconds": 2.7551164999895263,
+          "all_seconds": [
+            1.7669660999963526,
+            1.7493918999971356,
+            2.414346600009594,
+            2.7551164999895263,
+            1.797893600014504
+          ]
+        },
+        "keyword_count": 12,
+        "cold_result_rows": 98
+      }
+    },
+    "representative_end_to_end": {
+      "scenario": "complex query through dashboard, offline synthetic source, rule analysis",
+      "runs": 5,
+      "funnel": {
+        "raw_listings": 80,
+        "normalized_listings": 66,
+        "unique_listings": 66,
+        "eligible_listings": 66,
+        "relevant_listings": 37,
+        "shortlisted_listings": 37
+      },
+      "total_latency": {
+        "observations": 5,
+        "p50_seconds": 1.2270916999841575,
+        "p95_seconds": 1.6999885600060223,
+        "minimum_seconds": 1.2101884000003338,
+        "maximum_seconds": 1.8097187000093982,
+        "all_seconds": [
+          1.2610679999925196,
+          1.2215228000131901,
+          1.2270916999841575,
+          1.8097187000093982,
+          1.2101884000003338
+        ]
+      },
+      "median_stage_seconds": {
+        "source_retrieval": 0.0011899000382982194,
+        "parse_and_normalize": 0.008823800075333565,
+        "analysis": 0.005691599857527763,
+        "persistence": 0.7713551000633743,
+        "result_query_and_render": 0.014888500008964911
+      },
+      "manual_review_reduction": 0.5375,
+      "compression_ratio": 2.1621621621621623
+    },
+    "limitations": [
+      "Synthetic offline source backed by two real HTML fixtures; not a live-board latency result.",
+      "Rule analysis only; external AI/model latency is not included.",
+      "Warm runs reuse persisted results and therefore do less work than cold runs.",
+      "Per-class sample sizes are too small for a stable p99."
+    ]
+  }
+}

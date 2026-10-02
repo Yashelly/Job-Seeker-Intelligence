@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .companies import MAX_REGISTRY_BYTES, SUPPORTED_ATS, CompanyRegistry
 from .io_utils import ProfileFileReader
 from .main import (
     _optional_env,
@@ -46,6 +47,7 @@ from .storage import DatabaseManager, bootstrap_database, canonicalize_source_ur
 from .tracking import ActionService, ApplicationTracker, utc_iso_to_local_datetime
 from .web_jobs import JobConflictError, JobManager
 from .web_scheduler import (
+    DEFAULT_SOURCES,
     DailyScheduler,
     ScheduleConfig,
     ScheduleError,
@@ -57,7 +59,30 @@ _ALLOWED_STATUS = {status.value.lower(): status for status in ApplicationStatus}
 _ALLOWED_SORTS = {"score", "newest", "title", "company"}
 _ALLOWED_STRATEGIES = {"ai", "rule"}
 WEB_BACKEND_CHOICES = ("rule", "demo", "openai", "claude_cli", "codex_cli")
-WEB_SOURCE_CHOICES = ("cvonline", "cvbankas", "hh", "startup_jobs", "justjoin", "euremotejobs", "sample")
+WEB_SOURCE_CHOICES = (
+    "careers",
+    "cvonline",
+    "cvbankas",
+    "cvmarket",
+    "hh",
+    "startup_jobs",
+    "justjoin",
+    "euremotejobs",
+    "sample",
+)
+WEB_SOURCE_LABELS = {
+    "careers": "Company careers",
+    "cvonline": "CV-Online",
+    "cvbankas": "CVBankas",
+    "cvmarket": "CVMarket",
+    "hh": "HeadHunter",
+    "startup_jobs": "Startup Jobs",
+    "justjoin": "Just Join IT",
+    "euremotejobs": "EU Remote Jobs",
+    "sample": "Sample",
+}
+SUPPORTED_CAREER_ATS = SUPPORTED_ATS
+MAX_COMPANY_IMPORT_BYTES = MAX_REGISTRY_BYTES
 _DEFAULT_EXPORT = "exports/job_seeker_report.md"
 _DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
 
@@ -220,6 +245,91 @@ async def require_safe_post(request: Request) -> dict[str, str]:
 
 def _db(request: Request) -> DatabaseManager:
     return DatabaseManager(request.app.state.db_path)
+
+
+def _company_registry(request: Request):
+    return CompanyRegistry(_db(request))
+
+
+def _source_choices() -> list[dict[str, str]]:
+    return [{"name": name, "label": WEB_SOURCE_LABELS.get(name, name)} for name in WEB_SOURCE_CHOICES]
+
+
+def _career_status(company: dict[str, Any]) -> dict[str, str]:
+    ats_type = str(company.get("ats_type") or "").strip().lower()
+    if ats_type not in SUPPORTED_CAREER_ATS:
+        return {"key": "manual-review", "label": "Manual review"}
+    if not _coerce_bool(str(company.get("collection_enabled", ""))):
+        return {"key": "off", "label": "Collection off"}
+    if ats_type in SUPPORTED_CAREER_ATS:
+        last_status = str(company.get("last_scan_status") or "").strip()
+        key = "-".join(last_status.lower().split()) if last_status else "ready"
+        return {"key": key, "label": last_status or "Ready"}
+    return {"key": "ready", "label": "Ready"}
+
+
+def _company_form_payload(form: dict[str, str]) -> dict[str, Any]:
+    aliases = [
+        item.strip()
+        for raw in str(form.get("aliases", "")).replace(",", "\n").splitlines()
+        for item in [raw]
+        if item.strip()
+    ]
+    return {
+        "name": form.get("name", ""),
+        "company_id": form.get("company_id", ""),
+        "pool": form.get("pool", ""),
+        "priority": form.get("priority", ""),
+        "career_url": form.get("career_url", ""),
+        "source_url": form.get("source_url", ""),
+        "ats_url": form.get("ats_url", ""),
+        "ats_type": form.get("ats_type", ""),
+        "ats_token": form.get("ats_token", ""),
+        "aliases": aliases,
+        "notes": form.get("notes", ""),
+        "check_status": form.get("check_status", ""),
+        "checked_on": form.get("checked_on", ""),
+        "remote_eligibility": form.get("remote_eligibility", ""),
+        "collection_enabled": _coerce_bool(form.get("collection_enabled")),
+    }
+
+
+def _company_view(company: dict[str, Any]) -> dict[str, Any]:
+    row = dict(company)
+    row["career_status"] = _career_status(row)
+    row["is_supported_ats"] = str(row.get("ats_type") or "").strip().lower() in SUPPORTED_CAREER_ATS
+    return row
+
+
+def _company_filters(request: Request) -> dict[str, str]:
+    status_filter = request.query_params.get("status", "")
+    return {
+        "q": request.query_params.get("q", "").strip(),
+        "pool": request.query_params.get("pool", "").strip(),
+        "status": status_filter if status_filter in {"", "enabled", "disabled", "supported", "manual_review", "failed", "partial"} else "",
+    }
+
+
+def _filter_companies(companies: list[dict[str, Any]], status_filter: str) -> list[dict[str, Any]]:
+    if status_filter in {"failed", "partial"}:
+        return [company for company in companies if company.get("last_scan_status") == status_filter]
+    if status_filter == "disabled":
+        return [company for company in companies if not _coerce_bool(str(company.get("collection_enabled", "")))]
+    if status_filter == "supported":
+        return [
+            company
+            for company in companies
+            if str(company.get("ats_type") or "").strip().lower() in SUPPORTED_CAREER_ATS
+        ]
+    if status_filter == "manual_review":
+        return [
+            company
+            for company in companies
+            if str(company.get("ats_type") or "").strip().lower() not in SUPPORTED_CAREER_ATS
+            or company.get("last_scan_status") in {"failed", "partial"}
+            or company.get("check_status") == "needs_review"
+        ]
+    return companies
 
 
 def _safe_external_url(value: str | None) -> str:
@@ -426,7 +536,7 @@ def _start_daily_job(app: FastAPI, schedule: ScheduleConfig) -> int:
 
     Returns the job id, or raises ``SchedulerBusyError`` if a job is active.
     """
-    sources = list(schedule.sources) or list(WEB_SOURCE_CHOICES)
+    sources = list(schedule.sources) or list(DEFAULT_SOURCES)
     keywords = list(schedule.keywords)
     strategy = schedule.analysis_strategy if schedule.analysis_strategy in _ALLOWED_STRATEGIES else "ai"
     args = _runner_namespace(
@@ -453,12 +563,24 @@ def _start_daily_job(app: FastAPI, schedule: ScheduleConfig) -> int:
 def _daily_job_outcome(app: FastAPI, job_id: int) -> str | None:
     """Report a started daily job's status so the scheduler can confirm success.
 
-    Returns the in-memory job status ("running" | "paused" | "done" | "error" |
-    "cancelled"), or ``None`` when the job is unknown (e.g. after a restart), which
-    the scheduler treats as a lost/failed run.
+    Returns the normalized scheduler status ("running" | "paused" | "done" |
+    "partial" | "error" | "cancelled"), or ``None`` when the job is unknown
+    (e.g. after a restart), which the scheduler treats as a lost/failed run.
     """
     job = app.state.jobs.get(job_id)
-    return job.status if job is not None else None
+    if job is None:
+        return None
+    if job.status in {"running", "paused", "cancelled"}:
+        return job.status
+    if job.status == "error":
+        return "error"
+    if job.status == "done":
+        if job.exit_code == 0:
+            return "done"
+        if job.exit_code == 2:
+            return "partial"
+        return "error"
+    return "error"
 
 
 def create_app(
@@ -652,6 +774,147 @@ def create_app(
         # Actions were merged into the Applications page.
         return _redirect("/applications")
 
+    @app.get("/companies")
+    def companies(request: Request):
+        registry = _company_registry(request)
+        filters = _company_filters(request)
+        companies = registry.list_companies(
+            query=filters["q"],
+            pool=filters["pool"],
+            enabled_only=filters["status"] == "enabled",
+        )
+        companies = [_company_view(company) for company in _filter_companies(companies, filters["status"])]
+        all_companies = registry.list_companies()
+        coverage = {
+            "total": len(all_companies),
+            "enabled": sum(bool(company.get("collection_enabled")) for company in all_companies),
+            **{status: sum(company.get("last_scan_status") == status for company in all_companies)
+               for status in ("completed", "partial", "failed")},
+        }
+        pools = sorted(
+            {
+                str(company.get("pool") or "").strip()
+                for company in registry.list_companies(query="", pool="", enabled_only=False)
+                if str(company.get("pool") or "").strip()
+            }
+        )
+        return _render(
+            templates,
+            request,
+            "companies.html",
+            page_title="Companies",
+            companies=companies,
+            coverage=coverage,
+            filters=filters,
+            pools=pools,
+            source_choices=_source_choices(),
+            supported_ats=sorted(SUPPORTED_CAREER_ATS),
+            import_message=request.query_params.get("import_message", ""),
+        )
+
+    @app.get("/companies/new")
+    def new_company(request: Request):
+        return _render(
+            templates,
+            request,
+            "company_form.html",
+            page_title="Add Company",
+            company={},
+            original_company_id="",
+            action="/companies/save",
+            supported_ats=sorted(SUPPORTED_CAREER_ATS),
+        )
+
+    @app.get("/companies/{company_id}/edit")
+    def edit_company(request: Request, company_id: str):
+        company = _company_registry(request).get(company_id)
+        if company is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Company not found.")
+        return _render(
+            templates,
+            request,
+            "company_form.html",
+            page_title="Edit Company",
+            company=company,
+            original_company_id=company_id,
+            action="/companies/save",
+            supported_ats=sorted(SUPPORTED_CAREER_ATS),
+        )
+
+    @app.post("/companies/save")
+    def save_company(request: Request, form: dict[str, str] = Depends(require_safe_post)):
+        registry = _company_registry(request)
+        original_company_id = form.get("_original_company_id", "").strip() or None
+        payload = _company_form_payload(form)
+        try:
+            saved = registry.save(payload, company_id=original_company_id)
+        except ValueError as error:
+            return _render(
+                templates,
+                request,
+                "company_form.html",
+                page_title="Edit Company" if original_company_id else "Add Company",
+                company=payload,
+                original_company_id=original_company_id or "",
+                action="/companies/save",
+                supported_ats=sorted(SUPPORTED_CAREER_ATS),
+                error=str(error),
+            )
+        return _redirect(f"/companies/{saved['company_id']}/edit")
+
+    @app.post("/companies/collect")
+    def collect_companies(request: Request, form: dict[str, str] = Depends(require_safe_post)):
+        keywords = _profile_search_keywords(request.app.state.profile_path) or ["automation"]
+        args = _runner_namespace(
+            profile_path=request.app.state.profile_path,
+            db_path=str(request.app.state.db_path),
+            enabled_sources=["careers"],
+            keywords=keywords,
+            limit=5000,
+            max_pages=100,
+            analysis_strategy="ai",
+            refresh=False,
+            daily_run=False,
+            prune_threshold=None,
+            auto_save=True,
+            auto_save_threshold=40,
+            infinite=True,
+        )
+        run_cfg = _build_run_cfg(request.app.state.cfg, ["careers"], keywords)
+        try:
+            job = request.app.state.jobs.start("careers", lambda control: run_batch(args, run_cfg, control=control))
+        except JobConflictError as error:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+        return _redirect(f"/jobs/{job.id}")
+
+    @app.post("/companies/import")
+    async def import_companies(
+        request: Request,
+        company_file: UploadFile,
+        _guard: None = Depends(require_safe_multipart),
+    ):
+        data = await company_file.read(MAX_COMPANY_IMPORT_BYTES + 1)
+        if len(data) > MAX_COMPANY_IMPORT_BYTES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Company import file is too large.")
+        if not data:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload a JSON or ZIP file.")
+        try:
+            result = _company_registry(request).import_bytes(data, company_file.filename or "")
+        except ValueError as error:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+        inserted = int(result.get("inserted", 0) or 0)
+        skipped = int(result.get("skipped", 0) or 0)
+        message = f"Imported {inserted} company record(s); skipped {skipped} existing record(s)."
+        return _redirect(f"/companies?{urlencode({'import_message': message})}")
+
+    @app.get("/companies/export")
+    def export_companies(request: Request):
+        payload = _company_registry(request).export()
+        return JSONResponse(
+            payload,
+            headers={"Content-Disposition": 'attachment; filename="career-companies.json"'},
+        )
+
     @app.post("/actions/create")
     def create_action(request: Request, form: dict[str, str] = Depends(require_safe_post)):
         try:
@@ -738,7 +1001,7 @@ def create_app(
             request,
             "search.html",
             page_title="Search",
-            sources=WEB_SOURCE_CHOICES,
+            sources=_source_choices(),
             default_sources=["cvbankas", "hh", "justjoin"],
             default_limit=10,
             default_pages=1,
@@ -881,7 +1144,7 @@ def create_app(
             "schedule.html",
             page_title="Schedule",
             schedule=request.app.state.scheduler.snapshot(),
-            sources=WEB_SOURCE_CHOICES,
+            sources=_source_choices(),
             strategies=sorted(_ALLOWED_STRATEGIES),
             telegram_ready=_telegram_ready(),
         )
