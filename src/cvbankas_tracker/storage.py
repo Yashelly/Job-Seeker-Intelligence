@@ -37,6 +37,20 @@ _LOCK_BYTE_COUNT = 1
 _UNSET = object()
 _WRITE_LOCKS_GUARD = threading.Lock()
 _WRITE_LOCKS: dict[Path, threading.RLock] = {}
+_CAREER_COMPANY_SCAN_COLUMNS: dict[str, str] = {
+    "last_scan_at": "TEXT",
+    "last_scan_status": "TEXT",
+    "last_scan_error": "TEXT NOT NULL DEFAULT ''",
+    "last_scan_jobs_count": "INTEGER",
+}
+_CAREER_COMPANY_REQUIRED_COLUMNS = {
+    "company_id",
+    "name_key",
+    "data_json",
+    "created_at",
+    "updated_at",
+    *_CAREER_COMPANY_SCAN_COLUMNS,
+}
 
 try:
     import msvcrt
@@ -432,6 +446,18 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
             value_json TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS career_companies (
+            company_id TEXT PRIMARY KEY,
+            name_key TEXT NOT NULL UNIQUE,
+            data_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_scan_at TEXT,
+            last_scan_status TEXT,
+            last_scan_error TEXT NOT NULL DEFAULT '',
+            last_scan_jobs_count INTEGER
+        );
+
         CREATE TABLE IF NOT EXISTS vacancy_url_aliases (
             original_source_url TEXT PRIMARY KEY,
             canonical_source_url TEXT NOT NULL,
@@ -499,6 +525,8 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
     _ensure_column(connection, "vacancies", "first_seen_at", "TEXT")
     _ensure_column(connection, "vacancies", "original_source_url", "TEXT")
     _ensure_column(connection, "vacancy_url_aliases", "legacy_vacancy_json", "TEXT")
+    for column_name, definition in _CAREER_COMPANY_SCAN_COLUMNS.items():
+        _ensure_column(connection, "career_companies", column_name, definition)
     _canonicalize_legacy_vacancy_urls(connection)
     _baseline_legacy_application_status_events(connection)
     connection.executescript(
@@ -531,7 +559,43 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
             ON action_items(vacancy_source_url);
         """
     )
+    if not _has_single_column_unique_constraint(connection, "career_companies", "company_id"):
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_career_companies_company_id_unique "
+            "ON career_companies(company_id)"
+        )
+    if not _has_single_column_unique_constraint(connection, "career_companies", "name_key"):
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_career_companies_name_key_unique "
+            "ON career_companies(name_key)"
+        )
     connection.commit()
+
+
+def _quote_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def _has_single_column_unique_constraint(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+) -> bool:
+    for column in connection.execute(f"PRAGMA table_info({_quote_identifier(table_name)})").fetchall():
+        if column["name"] == column_name and int(column["pk"] or 0) > 0:
+            return True
+
+    for index in connection.execute(f"PRAGMA index_list({_quote_identifier(table_name)})").fetchall():
+        if not int(index["unique"] or 0):
+            continue
+        if "partial" in index.keys() and int(index["partial"] or 0):
+            continue
+        index_columns = connection.execute(
+            f"PRAGMA index_info({_quote_identifier(index['name'])})"
+        ).fetchall()
+        if [row["name"] for row in index_columns] == [column_name]:
+            return True
+    return False
 
 
 def _schema_needs_migration(connection: sqlite3.Connection) -> bool:
@@ -544,6 +608,7 @@ def _schema_needs_migration(connection: sqlite3.Connection) -> bool:
         "collection_run_observations",
         "telegram_summary_outbox",
         "settings",
+        "career_companies",
         "vacancy_url_aliases",
         "application_status_events",
         "action_items",
@@ -561,6 +626,17 @@ def _schema_needs_migration(connection: sqlite3.Connection) -> bool:
         row["name"] for row in connection.execute("PRAGMA table_info(vacancies)").fetchall()
     }
     if not {"source_name", "raw_text", "original_source_url", "first_seen_at", "last_seen_at", "first_seen_run_id", "last_seen_run_id"}.issubset(vacancy_columns):
+        return True
+
+    career_company_columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(career_companies)").fetchall()
+    }
+    if not _CAREER_COMPANY_REQUIRED_COLUMNS.issubset(career_company_columns):
+        return True
+    if not _has_single_column_unique_constraint(connection, "career_companies", "company_id"):
+        return True
+    if not _has_single_column_unique_constraint(connection, "career_companies", "name_key"):
         return True
 
     required_indexes = {
@@ -899,6 +975,15 @@ class DatabaseManager:
     def close(self) -> None:
         """Compatibility no-op; operational connections are per method."""
 
+    @staticmethod
+    def _check_career_source_revision(connection: sqlite3.Connection, guard: tuple[str, int] | None) -> None:
+        if guard is None:
+            return
+        company_id, revision = guard
+        row = connection.execute("SELECT data_json FROM career_companies WHERE company_id = ?", (company_id,)).fetchone()
+        if row is None or json.loads(row["data_json"]).get("source_revision", 0) != revision:
+            raise ValueError("Career source changed after discovery; stale vacancy data was not saved.")
+
     def begin_collection_run(self, *, queue_telegram_summary: bool = False) -> CollectionRun:
         now = utc_now_iso()
         db_identity = str(self._db_path)
@@ -1131,10 +1216,12 @@ class DatabaseManager:
         source_name: str | None = None,
         observed_at: str | None = None,
         original_source_url: str | None = None,
+        career_source_revision: tuple[str, int] | None = None,
     ) -> bool:
         canonical_url = canonicalize_source_url(source_url)
         observed_at = observed_at or utc_now_iso()
         with self.transaction() as connection:
+            self._check_career_source_revision(connection, career_source_revision)
             row = connection.execute(
                 "SELECT source_name FROM vacancies WHERE source_url = ?",
                 (canonical_url,),
@@ -1468,6 +1555,7 @@ class DatabaseManager:
         application_note: str = "",
         auto_save: bool = True,
         auto_save_threshold: int = 0,
+        career_source_revision: tuple[str, int] | None = None,
     ) -> tuple[int, ApplicationRecord | None]:
         """Persist one processed vacancy as one all-or-nothing write unit.
 
@@ -1490,6 +1578,7 @@ class DatabaseManager:
         original_source_url = original_source_url or vacancy.source_url
         now = utc_now_iso()
         with self.transaction() as connection:
+            self._check_career_source_revision(connection, career_source_revision)
             connection.execute(
                 """
                 INSERT INTO vacancies (
@@ -1545,26 +1634,52 @@ class DatabaseManager:
                     """,
                     (collection_run_id, canonical_url, observed_at, vacancy.source_name, original_source_url),
                 )
-            cursor = connection.execute(
-                """
-                INSERT INTO analyses (
-                    vacancy_source_url, analysis_method, score, fit_label, explanation,
-                    matched_points_json, missing_points_json, notes
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    canonical_url,
-                    analysis.analysis_method.value,
-                    analysis.score,
-                    analysis.fit_label.value,
-                    analysis.explanation,
-                    json.dumps(list(analysis.matched_points)),
-                    json.dumps(list(analysis.missing_points)),
-                    analysis.notes,
-                ),
+            analysis_values = (
+                canonical_url,
+                analysis.analysis_method.value,
+                analysis.score,
+                analysis.fit_label.value,
+                analysis.explanation,
+                json.dumps(list(analysis.matched_points)),
+                json.dumps(list(analysis.missing_points)),
+                analysis.notes,
             )
-            analysis_id = int(cursor.lastrowid)
+            # Processing retries can arrive concurrently with the same canonical
+            # vacancy and deterministic result. Analyses have no timestamp, so
+            # retaining byte-for-byte duplicates provides no usable history and
+            # makes retries look like separate evaluations. Reuse only an exact
+            # payload match; a changed score, explanation, or evidence remains a
+            # new analysis record.
+            existing_analysis = connection.execute(
+                """
+                SELECT id FROM analyses
+                WHERE vacancy_source_url = ?
+                  AND analysis_method = ?
+                  AND score = ?
+                  AND fit_label = ?
+                  AND explanation = ?
+                  AND matched_points_json = ?
+                  AND missing_points_json = ?
+                  AND notes = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                analysis_values,
+            ).fetchone()
+            if existing_analysis is None:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO analyses (
+                        vacancy_source_url, analysis_method, score, fit_label, explanation,
+                        matched_points_json, missing_points_json, notes
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    analysis_values,
+                )
+                analysis_id = int(cursor.lastrowid)
+            else:
+                analysis_id = int(existing_analysis["id"])
             existing_application = connection.execute(
                 "SELECT * FROM applications WHERE vacancy_source_url = ?",
                 (canonical_url,),

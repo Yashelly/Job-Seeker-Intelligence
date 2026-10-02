@@ -68,3 +68,8 @@ profile_from_cv.json
 # Coverage data (local + CI)
 .coverage
 htmlcov/
+
+# Blind-evaluation labels and generated results must remain local.  Keeping
+# answers outside Git preserves the separation between development and holdout.
+benchmarks/private/
+benchmarks/*.private.json

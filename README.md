@@ -142,6 +142,28 @@ Building a profile from a CV (`/profile` upload, or TUI menu `10`) requires an A
 - **Bootstrap** enables WAL, serializes migrations with a lock file, takes a timestamped backup before any migration, and runs integrity/foreign-key checks that halt before serving on failure.
 - Relative DB paths from YAML are anchored to the config directory; the example config declares `db: job_seeker.db`, so an auto-config launch uses `config/job_seeker.db`.
 
+## Company career registry
+
+The dashboard's **Companies** page keeps a persistent employer directory in the same SQLite database as vacancies. Upload `companies.json` or a ZIP containing `career_registry/companies.json` to import a directory. The importer reads only company data; scripts, automation prompts, private application files, and archived databases are never executed or imported. Existing entries are skipped on repeat imports, preserving manual changes.
+
+Use **Add company** to enter a name and career URL, or **Edit** to maintain aliases, pool, priority, notes, and collection settings. Public Ashby, Lever, Greenhouse, Workable, Recruitee, SmartRecruiters, and Personio board URLs identify their provider and token automatically. Enable collection for other public career pages to use the HTML collector. A company can remain in the directory with collection disabled while its source is being investigated. **Export JSON** creates a portable copy of directory metadata; local scan results are reset when that copy is imported into another database.
+
+Select **Company careers** on Search or Schedule to collect enabled boards through the shared vacancy pipeline. Collected postings receive the same analysis, duplicate detection, and application tracking as other sources. A manual run is also available from the CLI:
+
+```bash
+python main.py --sources careers --analysis-strategy rule
+```
+
+Collection supports public Ashby, Lever, Greenhouse, Workable, Recruitee, SmartRecruiters, Personio XML, and Teamtailor RSS feeds. Other career pages use structured JobPosting data or recognizable vacancy detail pages. An unreadable JavaScript application or a blocked page is reported as failed; pagination limits and incomplete details are reported as partial. A readable career page is not evidence that all vacancies were collected. The Companies page shows local scan time, outcome, errors, and job counts; an unsuccessful scan has an unknown count rather than zero. Public-page requests reject private network addresses, credentials, nonstandard ports, and private redirects. The imported `EU-watch` pool denotes companies to investigate and does not establish eligibility to work remotely from Lithuania.
+
+Workday and Paylocity career sites are also supported. Dedicated public collectors handle Elastic's search application, Doist's current server-rendered job fragment, and SEB's career API. HTML listing-page and detail-page budgets are separate, so a daily scan can process descriptions beyond the first 100 linked jobs.
+
+Additional `ats_sources` supplement the primary board. Repeated boards are fetched once; a shared group board can specify `vacancy_company_name` for each employer. Conflicting employer names for the same posting require review and produce a partial result. Company source edits and renames invalidate old scans and prevent stale results from being saved, including jobs already known to the database.
+
+Career discovery has aggregate limits of 10,000 requests, 1 GiB of responses, 50,000 unique job URLs, and a 7,200-second elapsed-time budget. Configure `max_requests`, `max_total_bytes`, `max_jobs`, or `max_collection_seconds` under `sources.options.careers`. Limits retain collected jobs and mark unchecked companies as partial with an unknown count. Time is checked between operations, and individual requests have a timeout. Company counts describe discovered postings; analyzed and saved job counts belong to the search run. Batch exit codes are `0` for completed runs, including successful empty runs, `2` for partial runs, and `1` for failures. The daily scheduler records a partial run accurately and runs again on the next scheduled day.
+
+Group companies can contain an `ats_sources` list of separate boards. Shared Greenhouse boards can use `greenhouse_metadata_filter` with an `id` and `value` to restrict jobs to the intended company. These fields survive registry export/import. Daily search reads the current directory each run, so new enabled companies join the next scheduled search.
+
 ## Testing & CI
 
 ```bash

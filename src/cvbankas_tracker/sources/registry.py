@@ -4,6 +4,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from .base import VacancySource
+from .careers import CareerPagesSource
 from .cvbankas import CvbankasSource
 from .cvmarket import CvMarketSource
 from .cvonline import CvOnlineSource
@@ -34,7 +35,10 @@ def build_source_registry(
     euremotejobs_source = EuRemoteJobsSource.from_options(
         _options_for_source(source_options, "euremotejobs")
     )
+    careers_source = CareerPagesSource.from_options(_options_for_source(source_options, "careers"))
     return {
+        "careers": careers_source,
+        "career_pages": careers_source,
         "cvbankas": CvbankasSource(),
         "cvmarket": CvMarketSource(),
         "cvonline": CvOnlineSource(),

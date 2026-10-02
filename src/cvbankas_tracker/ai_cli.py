@@ -56,7 +56,7 @@ def coerce_score(raw: object, *, low: int = 0, high: int = 100) -> int:
     """
     if isinstance(raw, bool):
         return low
-    if isinstance(raw, (int, float)):
+    if isinstance(raw, int | float):
         value: float = raw
     else:
         match = _SCORE_DIGITS.search(str(raw))
@@ -76,11 +76,11 @@ def coerce_str_list(raw: object) -> list[str]:
     if isinstance(raw, str):
         text = raw.strip()
         return [text] if text else []
-    if not isinstance(raw, (list, tuple)):
+    if not isinstance(raw, list | tuple):
         return []
     items: list[str] = []
     for value in raw:
-        if value is None or isinstance(value, (dict, list, tuple)):
+        if value is None or isinstance(value, dict | list | tuple):
             continue
         text = str(value).strip()
         if text:

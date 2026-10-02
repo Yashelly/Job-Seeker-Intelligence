@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>{{ page_title }}</h2>
+  <p class="muted">Add the career page first. Supported board links are detected automatically when possible.</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <form method="post" action="{{ action }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="_original_company_id" value="{{ original_company_id or '' }}">
+
+    <div class="row">
+      <div>
+        <label for="name">Company name</label>
+        <input id="name" name="name" value="{{ company.name or '' }}" required>
+      </div>
+      <div>
+        <label for="company_id">Company ID</label>
+        <input id="company_id" name="company_id" value="{{ company.company_id or '' }}" placeholder="generated from name if blank"{% if original_company_id %} readonly{% endif %}>
+        {% if original_company_id %}<p class="hint">The company ID stays fixed after creation.</p>{% endif %}
+      </div>
+    </div>
+
+    <label for="career_url">Career page URL</label>
+    <input id="career_url" name="career_url" type="url" value="{{ company.career_url or '' }}" placeholder="https://example.com/careers">
+
+    <div class="row">
+      <div>
+        <label for="pool">Pool</label>
+        <input id="pool" name="pool" value="{{ company.pool or 'LT' }}">
+      </div>
+      <div>
+        <label for="priority">Priority</label>
+        <select id="priority" name="priority">
+          {% for value in [1, 2, 3] %}
+          <option value="{{ value }}"{% if (company.priority or 2)|string == value|string %} selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="remote_eligibility">Remote eligibility</label>
+        <input id="remote_eligibility" name="remote_eligibility" list="remote_eligibility_options" value="{{ company.remote_eligibility or 'check_each_job' }}">
+        <datalist id="remote_eligibility_options">
+          <option value="check_each_job">
+          <option value="remote_first">
+          <option value="hybrid">
+          <option value="onsite">
+          <option value="unknown">
+        </datalist>
+      </div>
+    </div>
+
+    <label for="aliases">Aliases</label>
+    <textarea id="aliases" name="aliases" rows="3" placeholder="One per line">{{ (company.aliases or []) | join('\n') }}</textarea>
+
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="4">{{ company.notes or '' }}</textarea>
+
+    <fieldset>
+      <legend>Automatic collection</legend>
+      <label class="inline"><input type="checkbox" name="collection_enabled" value="on"{% if company.collection_enabled %} checked{% endif %}> Enable automatic collection</label>
+      <p class="hint">Supported collectors: {{ supported_ats | join(", ") }}. Use html for other public career pages. Unreadable pages appear as failed or partial scans.</p>
+
+      <div class="row">
+        <div>
+          <label for="ats_url">ATS board URL</label>
+          <input id="ats_url" name="ats_url" type="url" value="{{ company.ats_url or '' }}" placeholder="https://jobs.ashbyhq.com/company">
+        </div>
+        <div>
+          <label for="ats_type">ATS type</label>
+          <input id="ats_type" name="ats_type" value="{{ company.ats_type or '' }}" placeholder="auto-detected">
+        </div>
+        <div>
+          <label for="ats_token">ATS token</label>
+          <input id="ats_token" name="ats_token" value="{{ company.ats_token or '' }}" placeholder="board identifier">
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Review metadata</legend>
+      <div class="row">
+        <div>
+          <label for="source_url">Source URL</label>
+          <input id="source_url" name="source_url" type="url" value="{{ company.source_url or '' }}">
+        </div>
+        <div>
+          <label for="check_status">Check status</label>
+          <input id="check_status" name="check_status" value="{{ company.check_status or 'unverified' }}">
+        </div>
+        <div>
+          <label for="checked_on">Checked on</label>
+          <input id="checked_on" name="checked_on" type="date" value="{{ company.checked_on or '' }}">
+        </div>
+      </div>
+    </fieldset>
+
+    <button type="submit">Save company</button>
+    <a class="button secondary" href="/companies">Back to companies</a>
+  </form>
+</section>
+{% endblock %}

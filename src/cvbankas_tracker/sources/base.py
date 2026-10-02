@@ -6,6 +6,10 @@ from typing import Protocol
 from ..models import Vacancy
 
 
+class CollectionCancelledError(RuntimeError):
+    """Stop collecting without treating cancellation as an employer outage."""
+
+
 class VacancySource(Protocol):
     """Common interface for vacancy providers."""
 
