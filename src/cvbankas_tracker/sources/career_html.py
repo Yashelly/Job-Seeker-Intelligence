@@ -337,7 +337,7 @@ def _has_type(node: Mapping[str, object], expected: str) -> bool:
     return node_type == expected or (isinstance(node_type, list) and expected in node_type)
 
 
-def _detail_links(html_text: str, page_url: str, start_url: str) -> list[str]:
+def _detail_links_base(html_text: str, page_url: str, start_url: str) -> list[str]:
     urls: list[str] = []
     seen: set[str] = set()
     def add_candidate(candidate: str, signal: str) -> None:
@@ -367,6 +367,31 @@ def _detail_links(html_text: str, page_url: str, start_url: str) -> list[str]:
     return urls
 
 
+def _detail_links(html_text: str, page_url: str, start_url: str):
+    from urllib.parse import urlsplit
+
+    origin = urlsplit(start_url)
+    result = []
+    seen = set()
+    for candidate in _detail_links_base(html_text, page_url, start_url):
+        url = candidate.rstrip("\\")
+        parsed = urlsplit(url)
+        path = parsed.path.lower().rstrip("/")
+        if re.search(r"\.(?:jpe?g|png|webp|gif|svg|ico|pdf|css|js|zip|mp4)$", path):
+            continue
+        if parsed.netloc.lower() == origin.netloc.lower() and path == origin.path.lower().rstrip("/") and not parsed.query:
+            continue
+        if re.fullmatch(r"/(?:[a-z]{2}(?:-[a-z]{2})?/)?(?:jobs?|careers?)", path) and not parsed.query:
+            continue
+        if any(segment in {"blog", "culture", "privacy", "oembed", "job-description-templates"} for segment in path.split("/")):
+            continue
+        if url not in seen:
+            seen.add(url)
+            result.append(url)
+    return result
+
+
+
 def _same_site_or_known_ats(url: str, start_url: str) -> bool:
     host = (urlparse(url).hostname or "").lower()
     start_host = (urlparse(start_url).hostname or "").lower()
@@ -389,7 +414,7 @@ def _attrs(value: str) -> dict[str, str]:
     return {match.group("name").lower(): html.unescape(match.group("value")) for match in _ATTR_RE.finditer(value)}
 
 
-def _strong_job_page(title: str, description: str, html_text: str) -> bool:
+def _strong_job_page_base(title: str, description: str, html_text: str) -> bool:
     if len(description) < _DESCRIPTION_MIN_CHARS:
         return False
     haystack = f"{title} {html_text}".lower()
@@ -424,7 +449,16 @@ def _strong_job_page(title: str, description: str, html_text: str) -> bool:
     return title_signal and apply_signal
 
 
-def _extract_title(html_text: str) -> str:
+def _strong_job_page(title: str, description: str, html_text: str):
+    if _strong_job_page_base(title, description, html_text):
+        return True
+    if re.search(r"\b(?:intern|executive|owner|officer|scientist|researcher|coordinator|recruiter|accountant|administrator)\b", title, re.I):
+        return _strong_job_page_base("Specialist " + title, description, html_text)
+    return False
+
+
+
+def _extract_title_base(html_text: str) -> str:
     for pattern in (
         r"<h1[^>]*>(.*?)</h1>",
         r'''<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']''',
@@ -434,6 +468,22 @@ def _extract_title(html_text: str) -> str:
         if match:
             return _clean_text(match.group(1))
     return ""
+
+
+def _extract_title(html_text: str):
+    page_title_match = re.search(r"<title\b[^>]*>(.*?)</title>", html_text, re.I | re.S)
+    page_title = _clean_text(page_title_match.group(1)).casefold() if page_title_match else ""
+    matches = []
+    for match in re.finditer(r"<h1\b[^>]*>(.*?)</h1>", html_text, re.I | re.S):
+        heading = _clean_text(match.group(1))
+        normalized = heading.casefold()
+        if heading and len(heading) >= 5 and normalized in page_title:
+            if normalized not in {"careers", "career", "jobs", "open positions", "join our team"}:
+                matches.append((page_title.index(normalized), -len(heading), heading))
+    if matches:
+        return min(matches)[2]
+    return _extract_title_base(html_text)
+
 
 
 def _extract_description(html_text: str) -> str:
@@ -597,10 +647,19 @@ class _VisibleText(HTMLParser):
             self.text.append(data)
 
 
-def _looks_incomplete_page(html_text: str) -> bool:
+def _looks_incomplete_page_base(html_text: str) -> bool:
     visible = _clean_text(html_text).lower()
     raw = html_text.lower()
     return any(marker in visible or marker in raw for marker in _INCOMPLETE_PAGE_MARKERS)
+
+
+def _looks_incomplete_page(html_text: str):
+    next_data = "__next_data__" in html_text.lower()
+    without_scripts = re.sub(r"<script\b[^>]*>.*?</script>", "", html_text, flags=re.I | re.S)
+    without_scripts = re.sub(r"<style\b[^>]*>.*?</style>", "", without_scripts, flags=re.I | re.S)
+    without_scripts = re.sub(r"mixitup-disable-pagination", "", without_scripts, flags=re.I)
+    return next_data or _looks_incomplete_page_base(without_scripts)
+
 
 
 def _text(value: object) -> str:
