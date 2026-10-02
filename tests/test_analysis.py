@@ -1,18 +1,29 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from cvbankas_tracker.ai_fallback import AIProviderState
 from cvbankas_tracker.analysis import (
     AIBasedAnalysisStrategy,
+    CodexCLIAnalysisClient,
+    DemoAIAnalysisClient,
+    OpenAIAnalysisClient,
     RuleBasedAnalysisStrategy,
     VacancyAnalysisBuilder,
     VacancyAnalysisService,
+    _country_match_tokens,
     _detect_required_english_level,
     _detect_vacancy_work_mode,
+    _english_level_match,
     _experience_match_score,
+    _infer_profile_seniority,
+    _infer_vacancy_seniority,
+    _remote_country_restriction_is_compatible,
+    _role_match_score,
+    _work_mode_match_score,
 )
 from cvbankas_tracker.models import (
     AnalysisMethod,
@@ -279,6 +290,16 @@ class WorkModeDetectionTests(unittest.TestCase):
         # No signal -> assumed on-site.
         self.assertEqual(_detect_vacancy_work_mode("great team in vilnius"), "office")
 
+    def test_detects_negation_and_common_remote_phrases(self) -> None:
+        self.assertEqual(
+            _detect_vacancy_work_mode("Remote work is not available; on-site only"), "office"
+        )
+        self.assertEqual(
+            _detect_vacancy_work_mode("Not a hybrid role; work from our office"), "office"
+        )
+        self.assertEqual(_detect_vacancy_work_mode("Distributed team; location independent"), "remote")
+        self.assertEqual(_detect_vacancy_work_mode("Home-based contract"), "remote")
+
     def test_normalize_work_modes(self) -> None:
         raw = [
             {"mode": "Remote", "country": "Lithuania"},  # country cleared for remote
@@ -362,6 +383,219 @@ class WorkModeMatchTests(unittest.TestCase):
         self.assertFalse(
             any("work-mode" in point or "preferences" in point for point in analysis.missing_points)
         )
+
+    def test_rejects_explicit_remote_country_restriction(self) -> None:
+        analysis = self._analyze(
+            self._vacancy("Remote role; United States residents only"),
+            self._profile([WorkMode("remote"), WorkMode("hybrid", "Lithuania")]),
+        )
+        self.assertLess(analysis.score, 45)
+        self.assertTrue(any("country-residency" in point for point in analysis.missing_points))
+
+        residence_required = self._analyze(
+            self._vacancy("Remote role; must reside in the US"),
+            self._profile([WorkMode("remote"), WorkMode("hybrid", "Lithuania")]),
+        )
+        self.assertLess(residence_required.score, 45)
+
+
+class SeniorityInferenceTests(unittest.TestCase):
+    def test_distinguishes_staff_principal_and_contradictory_signals(self) -> None:
+        self.assertEqual(_infer_vacancy_seniority("Software Engineering Intern"), -1)
+        self.assertEqual(_infer_vacancy_seniority("Staff Software Engineer"), 4)
+        self.assertEqual(_infer_vacancy_seniority("Principal Data Engineer"), 4)
+        self.assertEqual(_infer_vacancy_seniority("Graduate Software Engineer"), 1)
+        self.assertEqual(_infer_vacancy_seniority("Not a senior role; junior applicants welcome"), 1)
+        self.assertEqual(_infer_vacancy_seniority("Senior or junior level depending on experience"), 0)
+
+
+class AnalysisClientCoverageTests(unittest.TestCase):
+    def test_demo_client_returns_normalized_boosted_analysis(self) -> None:
+        vacancy = Vacancy(
+            source_id="demo",
+            source_url="https://example.test/demo",
+            title="Python Developer",
+            company="Example",
+            location="Remote",
+            salary_text="",
+            requirements=["Python"],
+        )
+        profile = UserProfile(
+            name="Candidate",
+            target_roles=["Python Developer"],
+            skills=["Python"],
+            preferred_locations=["Remote"],
+            experience_level="mid",
+        )
+        result = DemoAIAnalysisClient().analyze(vacancy, profile)
+        self.assertGreaterEqual(result["score"], 10)
+        self.assertIn(result["fit_label"], {"Low", "Medium", "High"})
+        self.assertIn("AI-assisted", result["explanation"])
+
+    def test_openai_client_sends_structured_prompt_and_normalizes_response(self) -> None:
+        completion = MagicMock()
+        completion.choices[0].message.content = '{"score": 81, "fit_label": "High"}'
+        sdk = MagicMock()
+        sdk.chat.completions.create.return_value = completion
+        with patch("cvbankas_tracker.analysis.OpenAI", return_value=sdk):
+            client = OpenAIAnalysisClient(model="test-model", api_key="test-key")
+        result = client.analyze(
+            Vacancy(
+                source_id="openai",
+                source_url="https://example.test/openai",
+                title="Python Developer",
+                company="Example",
+                location="Remote",
+                salary_text="",
+            ),
+            UserProfile(
+                name="Candidate",
+                target_roles=["Python Developer"],
+                skills=["Python"],
+                preferred_locations=["Remote"],
+                experience_level="mid",
+            ),
+        )
+        self.assertEqual(result["score"], 81)
+        call = sdk.chat.completions.create.call_args.kwargs
+        self.assertEqual(call["model"], "test-model")
+        self.assertEqual(call["response_format"], {"type": "json_object"})
+
+    def test_codex_client_delegates_and_normalizes_response(self) -> None:
+        with patch(
+            "cvbankas_tracker.analysis.run_codex_cli",
+            return_value='{"score": 64, "fit_label": "Medium"}',
+        ) as run_codex:
+            result = CodexCLIAnalysisClient(command="codex-test", model="test-model").analyze(
+                Vacancy(
+                    source_id="codex",
+                    source_url="https://example.test/codex",
+                    title="Python Developer",
+                    company="Example",
+                    location="Remote",
+                    salary_text="",
+                ),
+                UserProfile(
+                    name="Candidate",
+                    target_roles=["Python Developer"],
+                    skills=["Python"],
+                    preferred_locations=["Remote"],
+                    experience_level="mid",
+                ),
+            )
+
+        self.assertEqual(result["score"], 64)
+        run_codex.assert_called_once()
+        self.assertEqual(run_codex.call_args.kwargs["command"], "codex-test")
+        self.assertEqual(run_codex.call_args.kwargs["model"], "test-model")
+
+
+class AnalysisDecisionBranchTests(unittest.TestCase):
+    @staticmethod
+    def profile(*, years=None, level="junior", locations=None, modes=None) -> UserProfile:
+        return UserProfile(
+            name="Candidate",
+            target_roles=["Python Developer"],
+            skills=["Python"],
+            preferred_locations=locations or [],
+            experience_level=level,
+            years_of_experience=years,
+            work_modes=modes or [],
+        )
+
+    def test_profile_seniority_covers_year_and_label_boundaries(self) -> None:
+        self.assertEqual(_infer_profile_seniority(self.profile(years=6)), 3)
+        self.assertEqual(_infer_profile_seniority(self.profile(years=2)), 2)
+        self.assertEqual(_infer_profile_seniority(self.profile(years=1)), 1)
+        self.assertEqual(_infer_profile_seniority(self.profile(level="senior")), 3)
+        self.assertEqual(_infer_profile_seniority(self.profile(level="mid-level")), 2)
+        self.assertEqual(_infer_profile_seniority(self.profile(level="junior")), 1)
+
+    def test_role_matching_covers_text_only_empty_and_symbolic_targets(self) -> None:
+        score, _ = _role_match_score(["AI Architect"], "python developer", "ai architect duties")
+        self.assertEqual(score, 15)
+        self.assertEqual(_role_match_score(["", "++"], "developer", "python role")[0], 0)
+
+    def test_experience_seniority_fallback_accepts_and_rejects(self) -> None:
+        vacancy = Vacancy(
+            source_id="senior",
+            source_url="https://example.test/senior",
+            title="Senior Python Developer",
+            company="Example",
+            location="",
+            salary_text="",
+        )
+        self.assertEqual(_experience_match_score(vacancy, self.profile(years=6))[0], 8)
+        self.assertEqual(_experience_match_score(vacancy, self.profile(years=1))[0], -8)
+
+    def test_rule_scoring_places_experience_notes_in_the_correct_bucket(self) -> None:
+        service = VacancyAnalysisService(primary_strategy=RuleBasedAnalysisStrategy())
+        positive = Vacancy(
+            source_id="positive",
+            source_url="https://example.test/positive",
+            title="Python Developer",
+            company="Example",
+            location="Remote",
+            salary_text="",
+            requirements=["1 year of experience"],
+        )
+        negative = Vacancy(
+            source_id="negative",
+            source_url="https://example.test/negative",
+            title="Python Developer",
+            company="Example",
+            location="Remote",
+            salary_text="",
+            requirements=["5 years of experience"],
+        )
+
+        matched = service.analyze(positive, self.profile(years=2))
+        missing = service.analyze(negative, self.profile(years=1))
+
+        self.assertTrue(any("experience" in point.lower() for point in matched.matched_points))
+        self.assertTrue(any("5+ year expectation" in point for point in missing.missing_points))
+
+    def test_neutral_english_and_matching_remote_helpers(self) -> None:
+        vacancy = Vacancy(
+            source_id="remote",
+            source_url="https://example.test/remote",
+            title="Python Developer",
+            company="Example",
+            location="Remote",
+            salary_text="",
+            requirements=["Python"],
+        )
+        profile = self.profile(years=2, modes=[WorkMode("remote")])
+        profile.max_english_level = "B2"
+
+        self.assertEqual(_english_level_match(vacancy, profile), (0, "", True))
+        self.assertEqual(_work_mode_match_score(vacancy, profile)[0], 10)
+
+    def test_country_and_mixed_schedule_boundaries(self) -> None:
+        self.assertEqual(_country_match_tokens(""), ())
+        self.assertEqual(
+            _detect_vacancy_work_mode("2 days remote and 3 days on-site"), "hybrid"
+        )
+        lithuania = self.profile(
+            locations=["Vilnius"], modes=[WorkMode("remote"), WorkMode("office", "Lithuania")]
+        )
+        self.assertTrue(_remote_country_restriction_is_compatible("remote across europe", lithuania))
+        unknown_location = self.profile(modes=[WorkMode("remote")])
+        self.assertTrue(
+            _remote_country_restriction_is_compatible(
+                "remote; united states residents only", unknown_location
+            )
+        )
+        self.assertTrue(
+            _remote_country_restriction_is_compatible(
+                "remote; residents only in an unspecified country", lithuania
+            )
+        )
+
+    def test_additional_seniority_phrase_boundaries(self) -> None:
+        self.assertEqual(_infer_vacancy_seniority("Seniority is not required"), 0)
+        self.assertEqual(_infer_vacancy_seniority("Middle Python developer"), 2)
+        self.assertEqual(_infer_vacancy_seniority("Entry-level Python developer"), 1)
 
 
 if __name__ == "__main__":

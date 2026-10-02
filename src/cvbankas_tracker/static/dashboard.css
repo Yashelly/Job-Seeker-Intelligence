@@ -308,6 +308,21 @@ tbody tr:hover { background: var(--surface-2); }
 }
 .row { display: flex; flex-wrap: wrap; gap: 1rem; }
 .row > div { flex: 1 1 180px; }
+.page-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.page-actions h2 { margin-top: 0; }
+.filter-bar, .upload-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.filter-bar > div, .upload-row > div { flex: 1 1 180px; }
 
 /* ---- Forms -------------------------------------------------------- */
 label {
@@ -375,6 +390,16 @@ button, .button {
 button:hover, .button:hover { background: var(--accent-hover); border-color: var(--accent-hover); text-decoration: none; }
 button:active, .button:active { transform: translateY(1px); }
 button:focus-visible, .button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+.button.secondary {
+  background: var(--surface);
+  color: var(--accent);
+  border-color: var(--border-strong);
+}
+.button.secondary:hover {
+  background: var(--surface-2);
+  color: var(--accent-hover);
+  border-color: var(--accent);
+}
 
 /* ---- Lists -------------------------------------------------------- */
 main ul { padding-left: 1.1rem; }

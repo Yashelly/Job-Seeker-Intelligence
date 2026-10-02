@@ -6,14 +6,16 @@ import time
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fastapi.testclient import TestClient
 
-from cvbankas_tracker.web import create_app
+from cvbankas_tracker.web import _daily_job_outcome, _start_daily_job, create_app
 from cvbankas_tracker.web_scheduler import (
+    DEFAULT_SOURCES,
     DailyScheduler,
     ScheduleConfig,
     ScheduleError,
@@ -161,6 +163,44 @@ class SchedulerTickTests(unittest.TestCase):
         self.assertEqual(reloaded.limit, 5)
         self.assertEqual(reloaded.analysis_strategy, "rule")
 
+    def test_partial_outcome_marks_day_partial_and_prevents_repeat(self) -> None:
+        calls: list[int] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            s = DailyScheduler(
+                Path(tmp) / "s.json",
+                lambda _cfg: calls.append(1) or 77,
+                outcome_getter=lambda _job_id: "partial",
+                config=ScheduleConfig(enabled=True, time="09:00"),
+            )
+            self.assertTrue(s.tick(_dt(2026, 8, 15, 9, 0)))
+            self.assertFalse(s.tick(_dt(2026, 8, 15, 9, 1)))
+            snap = s.config
+
+        self.assertEqual(calls, [1])
+        self.assertEqual(snap.last_status, "partial")
+        self.assertEqual(snap.last_run_date, "2026-08-15")
+
+    def test_failed_async_outcome_retries_within_daily_attempt_budget(self) -> None:
+        calls: list[int] = []
+        outcomes = iter(["error", "done"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            s = DailyScheduler(
+                Path(tmp) / "s.json",
+                lambda _cfg: calls.append(1) or len(calls),
+                outcome_getter=lambda _job_id: next(outcomes),
+                config=ScheduleConfig(enabled=True, time="09:00"),
+            )
+            self.assertTrue(s.tick(_dt(2026, 8, 15, 9, 0)))
+            self.assertTrue(s.tick(_dt(2026, 8, 15, 9, 1)))
+            self.assertFalse(s.tick(_dt(2026, 8, 15, 9, 2)))
+            snap = s.config
+
+        self.assertEqual(calls, [1, 1])
+        self.assertEqual(snap.last_status, "completed")
+        self.assertEqual(snap.last_run_date, "2026-08-15")
+
 
 def _client(tmp: str) -> TestClient:
     app = create_app(Path(tmp) / "web.db", profile_path="sample_data/active_profile.json")
@@ -170,6 +210,64 @@ def _client(tmp: str) -> TestClient:
 def _csrf(client: TestClient) -> str:
     client.get("/schedule")
     return client.cookies.get("job_seeker_csrf")
+
+
+class DailyJobAdapterTests(unittest.TestCase):
+    def test_start_daily_job_uses_scheduler_default_sources_for_legacy_empty_schedule(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeJobs:
+            def start(self, kind, target):
+                captured["kind"] = kind
+                captured["exit_code"] = target(SimpleNamespace())
+                return SimpleNamespace(id=42)
+
+        app = SimpleNamespace(
+            state=SimpleNamespace(
+                profile_path="sample_data/active_profile.json",
+                db_path="jobs.db",
+                cfg={},
+                jobs=FakeJobs(),
+            )
+        )
+
+        def fake_run_batch(args, cfg=None, control=None) -> int:
+            captured["sources"] = list(args.enabled_sources)
+            captured["cfg"] = cfg
+            captured["daily_run"] = args.daily_run
+            return 0
+
+        with patch("cvbankas_tracker.web.run_batch", fake_run_batch):
+            job_id = _start_daily_job(app, ScheduleConfig(sources=[]))
+
+        self.assertEqual(job_id, 42)
+        self.assertEqual(captured["kind"], "daily")
+        self.assertEqual(captured["exit_code"], 0)
+        self.assertEqual(captured["sources"], list(DEFAULT_SOURCES))
+        self.assertTrue(captured["daily_run"])
+
+    def test_daily_job_outcome_maps_terminal_exit_codes(self) -> None:
+        jobs = {
+            1: SimpleNamespace(status="done", exit_code=0),
+            2: SimpleNamespace(status="done", exit_code=2),
+            3: SimpleNamespace(status="done", exit_code=1),
+            4: SimpleNamespace(status="done", exit_code=99),
+            5: SimpleNamespace(status="error", exit_code=1),
+            6: SimpleNamespace(status="cancelled", exit_code=0),
+            7: SimpleNamespace(status="running", exit_code=None),
+            8: SimpleNamespace(status="paused", exit_code=None),
+        }
+        app = SimpleNamespace(state=SimpleNamespace(jobs=SimpleNamespace(get=jobs.get)))
+
+        self.assertEqual(_daily_job_outcome(app, 1), "done")
+        self.assertEqual(_daily_job_outcome(app, 2), "partial")
+        self.assertEqual(_daily_job_outcome(app, 3), "error")
+        self.assertEqual(_daily_job_outcome(app, 4), "error")
+        self.assertEqual(_daily_job_outcome(app, 5), "error")
+        self.assertEqual(_daily_job_outcome(app, 6), "cancelled")
+        self.assertEqual(_daily_job_outcome(app, 7), "running")
+        self.assertEqual(_daily_job_outcome(app, 8), "paused")
+        self.assertIsNone(_daily_job_outcome(app, 404))
 
 
 class ScheduleRoutesTests(unittest.TestCase):

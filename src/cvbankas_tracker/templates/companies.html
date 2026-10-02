@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="page-actions">
+    <div>
+      <h2>Company career registry</h2>
+      <p class="muted">Keep target employers, career pages, and supported ATS boards in one place.</p>
+      <p>{{ coverage.total }} companies · {{ coverage.enabled }} enabled · Latest checks: {{ coverage.completed }} completed, {{ coverage.partial }} partial, {{ coverage.failed }} failed.</p>
+    </div>
+    <a class="button" href="/companies/new">Add company</a>
+  </div>
+
+  {% if import_message %}
+  <p class="info-banner">{{ import_message }}</p>
+  {% endif %}
+
+  <form class="filter-bar" method="get" action="/companies">
+    <div>
+      <label for="q">Search</label>
+      <input id="q" name="q" value="{{ filters.q }}" placeholder="Company, alias, URL, notes">
+    </div>
+    <div>
+      <label for="pool">Pool</label>
+      <select id="pool" name="pool">
+        <option value="">All pools</option>
+        {% for pool in pools %}
+        <option value="{{ pool }}"{% if filters.pool == pool %} selected{% endif %}>{{ pool }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="status">Status</label>
+      <select id="status" name="status">
+        <option value=""{% if not filters.status %} selected{% endif %}>All statuses</option>
+        <option value="enabled"{% if filters.status == 'enabled' %} selected{% endif %}>Collection enabled</option>
+        <option value="supported"{% if filters.status == 'supported' %} selected{% endif %}>Supported ATS</option>
+        <option value="manual_review"{% if filters.status == 'manual_review' %} selected{% endif %}>Manual review</option>
+        <option value="failed"{% if filters.status == 'failed' %} selected{% endif %}>Failed scan</option>
+        <option value="partial"{% if filters.status == 'partial' %} selected{% endif %}>Partial scan</option>
+        <option value="disabled"{% if filters.status == 'disabled' %} selected{% endif %}>Collection off</option>
+      </select>
+    </div>
+    <button type="submit">Filter</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="page-actions">
+    <div>
+      <h2>Automatic collection</h2>
+      <p class="muted">Daily search checks enabled public ATS boards and HTML career pages. Source checks and discovered job counts are shown here; saved and analyzed jobs appear in search results.</p>
+    </div>
+    <form method="post" action="/companies/collect">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Collect careers</button>
+    </form>
+  </div>
+</section>
+
+<section class="card">
+  <div class="page-actions">
+    <div>
+      <h2>Registry</h2>
+      <p class="muted">{{ companies|length }} company record{{ '' if companies|length == 1 else 's' }} shown.</p>
+    </div>
+    <a class="button secondary" href="/companies/export">Export JSON</a>
+  </div>
+
+  <form method="post" action="/companies/import" enctype="multipart/form-data" class="upload-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div>
+      <label for="company_file">Import JSON or ZIP</label>
+      <input id="company_file" name="company_file" type="file" accept=".json,.zip,application/json,application/zip" required>
+      <p class="hint">Existing company IDs are skipped so manual edits stay intact. Limit: 5 MiB.</p>
+    </div>
+    <button type="submit">Import</button>
+  </form>
+
+  {% if companies %}
+  <table>
+    <thead>
+      <tr>
+        <th>Company</th>
+        <th>Pool</th>
+        <th>Career page</th>
+        <th>ATS</th>
+        <th>Collection</th>
+        <th>Last source check</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for company in companies %}
+      <tr>
+        <td>
+          <strong>{{ company.name }}</strong>
+          {% if company.aliases %}<br><span class="muted">{{ company.aliases | join(", ") }}</span>{% endif %}
+        </td>
+        <td>{{ company.pool }} · P{{ company.priority }}</td>
+        <td>
+          {% if company.career_url %}
+          <a href="{{ company.career_url|safe_external_url }}" target="_blank" rel="noopener noreferrer">Open</a>
+          {% else %}
+          <span class="muted">-</span>
+          {% endif %}
+        </td>
+        <td>
+          <span class="badge">{{ company.ats_type or 'unknown' }}</span>
+          {% if company.ats_token %}<br><span class="muted">{{ company.ats_token }}</span>{% endif %}
+          {% if company.ats_sources %}<br><span class="muted">{{ company.ats_sources|length }} boards</span>{% endif %}
+          {% if company.discovery_notes %}<details><summary>Source notes</summary>{{ company.discovery_notes }}</details>{% endif %}
+        </td>
+        <td><span class="badge status-{{ company.career_status.key }}">{{ company.career_status.label }}</span></td>
+        <td>
+          {% if company.last_scan_at %}
+          {{ company.last_scan_at }}<br>
+          <span class="muted">
+            {% if company.last_scan_jobs_count is not none %}{{ company.last_scan_jobs_count }} jobs discovered{% else %}Unknown count{% endif %}
+          </span>
+          {% else %}
+          <span class="muted">Not scanned</span>
+          {% endif %}
+          {% if company.last_scan_error %}<br><span class="error">{{ company.last_scan_error }}</span>{% endif %}
+        </td>
+        <td><a href="/companies/{{ company.company_id }}/edit">Edit</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No companies match these filters yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

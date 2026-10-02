@@ -6,6 +6,7 @@ openai_model: gpt-4.1-mini
 sources:
   enabled:
   - cvbankas
+  - cvmarket
   - hh
   - startup_jobs
   - justjoin
@@ -16,7 +17,7 @@ sources:
       browser_headless: true
       browser_profile_dir: .browser_profiles/hh
   keywords:
-    cvbankas:
+    cvbankas: &lt_automation_keywords
     - automatizavimas
     - automatizavimo specialistas
     - automatizavimo inžinierius
@@ -94,6 +95,7 @@ sources:
     - LangChain
     - LangGraph
     - Gemini
+    cvmarket: *lt_automation_keywords
     hh:
     - специалист по автоматизации
     - инженер автоматизации
