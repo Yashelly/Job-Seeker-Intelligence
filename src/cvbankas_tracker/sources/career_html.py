@@ -9,6 +9,8 @@ from urllib.error import HTTPError
 from urllib.parse import urldefrag, urljoin, urlparse
 
 from .base import CollectionCancelledError
+from .career_html_listing import collect_listing_html
+from .career_html_targeted import collect_targeted_html
 
 _JSON_LD_RE = re.compile(
     r'''<script[^>]+type=["']application/ld\+json["'][^>]*>(?P<data>.*?)</script>''',
@@ -95,6 +97,12 @@ def collect_html(
         raise ValueError("HTML career collection requires a career_url or ats_url.")
     _valid_public_url(start_url)
     max_pages = max(1, int(max_pages or 1))
+    listing = collect_listing_html(company, max_pages, fetch_html)
+    if listing is not None:
+        return listing
+    targeted = collect_targeted_html(company, max_pages, fetch_html)
+    if targeted is not None:
+        return targeted
     detail_budget = max(1, int(max_detail_pages)) if max_detail_pages is not None else max_pages
     detail_requests = 0
 
