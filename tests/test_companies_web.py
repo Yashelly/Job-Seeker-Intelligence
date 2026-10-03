@@ -73,63 +73,76 @@ def _wait_done(client: TestClient, job_id: int) -> dict:
 
 
 class CompaniesWebTests(unittest.TestCase):
-    def test_zip_import_is_idempotent_and_preserves_existing_records(self) -> None:
+    def test_company_import_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             client = _client(tmp)
-            token = _csrf(client)
-            archive = _zip_registry([_company_payload()])
-
-            resp = client.post(
-                "/companies/import",
-                data={"csrf_token": token},
-                files={"company_file": ("career_registry.zip", archive, "application/zip")},
-                headers=HEADERS,
-                follow_redirects=False,
-            )
-            self.assertEqual(resp.status_code, 303)
-            self.assertIn("Imported+1+company", resp.headers["location"])
-
             registry = CompanyRegistry(DatabaseManager(Path(tmp) / "web.db"))
-            registry.save({"notes": "Manual edit"}, company_id="acme-ai")
-
+            before = registry.list_companies()
             token = _csrf(client)
-            resp = client.post(
-                "/companies/import",
-                data={"csrf_token": token},
-                files={"company_file": ("career_registry.zip", archive, "application/zip")},
-                headers=HEADERS,
-                follow_redirects=False,
+            page = client.get("/companies")
+            self.assertEqual(page.status_code, 200)
+            self.assertNotIn('action="/companies/import"', page.text)
+            self.assertNotIn('name="company_file"', page.text)
+            records = [_company_payload()]
+            uploads = (
+                ("companies.json", json.dumps(records).encode(), "application/json"),
+                ("career_registry.zip", _zip_registry(records), "application/zip"),
             )
-            self.assertEqual(resp.status_code, 303)
-            self.assertIn("skipped+1+existing", resp.headers["location"])
-            self.assertEqual(registry.get("acme-ai")["notes"], "Manual edit")
+            for upload in uploads:
+                with self.subTest(filename=upload[0]):
+                    response = client.post(
+                        "/companies/import",
+                        data={"csrf_token": token},
+                        files={"company_file": upload},
+                        headers=HEADERS,
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(response.status_code, 404)
+            self.assertIsNone(registry.get("acme-ai"))
+            self.assertEqual(registry.list_companies(), before)
 
-    def test_create_edit_and_export_company(self) -> None:
+    def test_web_company_creation_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             client = _client(tmp)
-            token = _csrf(client, "/companies/new")
-            resp = client.post(
-                "/companies/save",
-                data={
-                    "csrf_token": token,
-                    "name": "Manual Co",
-                    "company_id": "manual-co",
-                    "pool": "EU",
-                    "priority": "2",
-                    "aliases": "Manual\nManual Labs",
-                    "remote_eligibility": "custom_remote_policy",
-                    "notes": "Needs custom parser",
-                    "check_status": "unverified",
-                },
-                headers=HEADERS,
-                follow_redirects=False,
-            )
-            self.assertEqual(resp.status_code, 303)
-            self.assertEqual(resp.headers["location"], "/companies/manual-co/edit")
-            self.assertIn("custom_remote_policy", client.get("/companies/manual-co/edit").text)
+            registry = CompanyRegistry(DatabaseManager(Path(tmp) / "web.db"))
+            before = registry.list_companies()
+            token = _csrf(client)
+            page = client.get("/companies")
+            self.assertEqual(page.status_code, 200)
+            self.assertNotIn('href="/companies/new"', page.text)
+            self.assertEqual(client.get("/companies/new").status_code, 404)
+            for original_id, expected_status in (("", 400), ("missing-company", 404)):
+                with self.subTest(original_id=original_id):
+                    response = client.post(
+                        "/companies/save",
+                        data={
+                            "csrf_token": token,
+                            "_original_company_id": original_id,
+                            "company_id": "manual-co",
+                            "name": "Manual Co",
+                            "career_url": "https://manual.example.test/jobs",
+                        },
+                        headers=HEADERS,
+                    )
+                    self.assertEqual(response.status_code, expected_status)
+            self.assertIsNone(registry.get("manual-co"))
+            self.assertEqual(registry.list_companies(), before)
 
+    def test_edit_and_export_existing_company(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _client(tmp)
+            registry = CompanyRegistry(DatabaseManager(Path(tmp) / "web.db"))
+            registry.save(_company_payload(
+                name="Manual Co",
+                company_id="manual-co",
+                pool="EU",
+                priority=2,
+                remote_eligibility="custom_remote_policy",
+                collection_enabled=False,
+            ))
+            self.assertIn("custom_remote_policy", client.get("/companies/manual-co/edit").text)
             token = _csrf(client, "/companies/manual-co/edit")
-            resp = client.post(
+            response = client.post(
                 "/companies/save",
                 data={
                     "csrf_token": token,
@@ -147,8 +160,8 @@ class CompaniesWebTests(unittest.TestCase):
                 headers=HEADERS,
                 follow_redirects=False,
             )
-            self.assertEqual(resp.status_code, 303)
-
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/companies/manual-co/edit")
             exported = client.get("/companies/export")
             self.assertEqual(exported.status_code, 200)
             self.assertIn("career-companies.json", exported.headers["content-disposition"])
@@ -181,7 +194,7 @@ class CompaniesWebTests(unittest.TestCase):
     def test_company_mutations_require_csrf_and_origin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             client = _client(tmp)
-            token = _csrf(client, "/companies/new")
+            token = _csrf(client)
             resp = client.post(
                 "/companies/save",
                 data={"csrf_token": token, "name": "No Origin", "career_url": "https://example.test/jobs"},

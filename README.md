@@ -144,9 +144,9 @@ Building a profile from a CV (`/profile` upload, or TUI menu `10`) requires an A
 
 ## Company career registry
 
-The dashboard's **Companies** page keeps a persistent employer directory in the same SQLite database as vacancies. Upload `companies.json` or a ZIP containing `career_registry/companies.json` to import a directory. The importer reads only company data; scripts, automation prompts, private application files, and archived databases are never executed or imported. Existing entries are skipped on repeat imports, preserving manual changes.
+The dashboard's **Companies** page shows a persistent employer directory in the same SQLite database as vacancies. The repository owner manages company additions and registry imports through `CompanyRegistry` and registry data.
 
-Use **Add company** to enter a name and career URL, or **Edit** to maintain aliases, pool, priority, notes, and collection settings. Public Ashby, Lever, Greenhouse, Workable, Recruitee, SmartRecruiters, and Personio board URLs identify their provider and token automatically. Enable collection for other public career pages to use the HTML collector. A company can remain in the directory with collection disabled while its source is being investigated. **Export JSON** creates a portable copy of directory metadata; local scan results are reset when that copy is imported into another database.
+The repository owner manages new company sources. Use **Edit** to maintain existing entries, including aliases, pool, priority, notes, and collection settings. Public Ashby, Lever, Greenhouse, Workable, Recruitee, SmartRecruiters, and Personio board URLs identify their provider and token automatically. Enable collection for other public career pages to use the HTML collector. A company can remain in the directory with collection disabled while its source is being investigated. **Export JSON** creates a portable copy of directory metadata; local scan results are reset when that copy is imported into another database.
 
 Select **Company careers** on Search or Schedule to collect enabled boards through the shared vacancy pipeline. Collected postings receive the same analysis, duplicate detection, and application tracking as other sources. A manual run is also available from the CLI:
 

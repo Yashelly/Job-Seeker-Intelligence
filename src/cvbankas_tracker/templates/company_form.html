@@ -2,12 +2,12 @@
 {% block content %}
 <section class="card">
   <h2>{{ page_title }}</h2>
-  <p class="muted">Add the career page first. Supported board links are detected automatically when possible.</p>
+  <p class="muted">Update the existing company record. Supported board links are detected automatically when possible.</p>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
   <form method="post" action="{{ action }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="_original_company_id" value="{{ original_company_id or '' }}">
+    <input type="hidden" name="_original_company_id" value="{{ original_company_id }}">
 
     <div class="row">
       <div>
@@ -16,8 +16,8 @@
       </div>
       <div>
         <label for="company_id">Company ID</label>
-        <input id="company_id" name="company_id" value="{{ company.company_id or '' }}" placeholder="generated from name if blank"{% if original_company_id %} readonly{% endif %}>
-        {% if original_company_id %}<p class="hint">The company ID stays fixed after creation.</p>{% endif %}
+        <input id="company_id" name="company_id" value="{{ company.company_id or '' }}" readonly>
+        <p class="hint">The company ID stays fixed after creation.</p>
       </div>
     </div>
 
