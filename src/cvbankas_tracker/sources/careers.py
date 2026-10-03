@@ -475,6 +475,8 @@ class CareerPagesSource:
             return self._collect_lever(company, token, max_pages, before_listing_fetch)
         if provider in SUPPORTED_EXTRA_ATS or provider in {"html", "workday", "elastic_custom", "astro_server_island", "seb"}:
             def fetch_html(url):
+                if company.get("company_id") == "epam":
+                    return self._fetch_public_text(url, before_listing_fetch, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
                 return self._fetch_public_text(url, before_listing_fetch)
 
             def fetch_json(url, payload=None, headers=None):
@@ -532,7 +534,7 @@ class CareerPagesSource:
         request = Request(url, data=json.dumps(payload).encode() if payload is not None else None, headers={
             "Accept": "text/html,application/json,application/xml;q=0.9,*/*;q=0.8",
             "User-Agent": os.getenv("JOB_SEEKER_USER_AGENT") or "JobSeekerCareerCollector/1.0",
-            "Content-Type": "application/json",
+            **({"Content-Type": "application/json"} if payload is not None else {}),
             **(headers or {}),
         })
         with build_opener(ProxyHandler({}), _PublicRedirectHandler(self._budget), _PublicHTTPHandler, _PublicHTTPSHandler, HTTPCookieProcessor(self._public_cookies)).open(request, timeout=self.timeout_seconds) as response:
