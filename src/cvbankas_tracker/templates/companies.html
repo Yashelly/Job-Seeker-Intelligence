@@ -4,15 +4,10 @@
   <div class="page-actions">
     <div>
       <h2>Company career registry</h2>
-      <p class="muted">Keep target employers, career pages, and supported ATS boards in one place.</p>
+      <p class="muted">View target employers, career pages, and source check results.</p>
       <p>{{ coverage.total }} companies · {{ coverage.enabled }} enabled · Latest checks: {{ coverage.completed }} completed, {{ coverage.partial }} partial, {{ coverage.failed }} failed.</p>
     </div>
-    <a class="button" href="/companies/new">Add company</a>
   </div>
-
-  {% if import_message %}
-  <p class="info-banner">{{ import_message }}</p>
-  {% endif %}
 
   <form class="filter-bar" method="get" action="/companies">
     <div>
@@ -65,16 +60,6 @@
     </div>
     <a class="button secondary" href="/companies/export">Export JSON</a>
   </div>
-
-  <form method="post" action="/companies/import" enctype="multipart/form-data" class="upload-row">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div>
-      <label for="company_file">Import JSON or ZIP</label>
-      <input id="company_file" name="company_file" type="file" accept=".json,.zip,application/json,application/zip" required>
-      <p class="hint">Existing company IDs are skipped so manual edits stay intact. Limit: 5 MiB.</p>
-    </div>
-    <button type="submit">Import</button>
-  </form>
 
   {% if companies %}
   <table>

@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .companies import MAX_REGISTRY_BYTES, SUPPORTED_ATS, CompanyRegistry
+from .companies import SUPPORTED_ATS, CompanyRegistry
 from .io_utils import ProfileFileReader
 from .main import (
     _optional_env,
@@ -82,7 +82,6 @@ WEB_SOURCE_LABELS = {
     "sample": "Sample",
 }
 SUPPORTED_CAREER_ATS = SUPPORTED_ATS
-MAX_COMPANY_IMPORT_BYTES = MAX_REGISTRY_BYTES
 _DEFAULT_EXPORT = "exports/job_seeker_report.md"
 _DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
 
@@ -809,20 +808,6 @@ def create_app(
             pools=pools,
             source_choices=_source_choices(),
             supported_ats=sorted(SUPPORTED_CAREER_ATS),
-            import_message=request.query_params.get("import_message", ""),
-        )
-
-    @app.get("/companies/new")
-    def new_company(request: Request):
-        return _render(
-            templates,
-            request,
-            "company_form.html",
-            page_title="Add Company",
-            company={},
-            original_company_id="",
-            action="/companies/save",
-            supported_ats=sorted(SUPPORTED_CAREER_ATS),
         )
 
     @app.get("/companies/{company_id}/edit")
@@ -844,7 +829,11 @@ def create_app(
     @app.post("/companies/save")
     def save_company(request: Request, form: dict[str, str] = Depends(require_safe_post)):
         registry = _company_registry(request)
-        original_company_id = form.get("_original_company_id", "").strip() or None
+        original_company_id = form.get("_original_company_id", "").strip()
+        if not original_company_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "An existing company is required.")
+        if registry.get(original_company_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Company not found.")
         payload = _company_form_payload(form)
         try:
             saved = registry.save(payload, company_id=original_company_id)
@@ -853,9 +842,9 @@ def create_app(
                 templates,
                 request,
                 "company_form.html",
-                page_title="Edit Company" if original_company_id else "Add Company",
+                page_title="Edit Company",
                 company=payload,
-                original_company_id=original_company_id or "",
+                original_company_id=original_company_id,
                 action="/companies/save",
                 supported_ats=sorted(SUPPORTED_CAREER_ATS),
                 error=str(error),
@@ -886,26 +875,6 @@ def create_app(
         except JobConflictError as error:
             raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
         return _redirect(f"/jobs/{job.id}")
-
-    @app.post("/companies/import")
-    async def import_companies(
-        request: Request,
-        company_file: UploadFile,
-        _guard: None = Depends(require_safe_multipart),
-    ):
-        data = await company_file.read(MAX_COMPANY_IMPORT_BYTES + 1)
-        if len(data) > MAX_COMPANY_IMPORT_BYTES:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Company import file is too large.")
-        if not data:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload a JSON or ZIP file.")
-        try:
-            result = _company_registry(request).import_bytes(data, company_file.filename or "")
-        except ValueError as error:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
-        inserted = int(result.get("inserted", 0) or 0)
-        skipped = int(result.get("skipped", 0) or 0)
-        message = f"Imported {inserted} company record(s); skipped {skipped} existing record(s)."
-        return _redirect(f"/companies?{urlencode({'import_message': message})}")
 
     @app.get("/companies/export")
     def export_companies(request: Request):
